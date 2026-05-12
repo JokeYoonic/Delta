@@ -1,42 +1,128 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   Users, Clock, Target, TrendingUp, AlertCircle, CheckCircle,
-  Mic2, Calendar,
-  Shield, Bell, BarChart3
+  Mic2, Calendar, Shield, Bell, BarChart3, Plus, Link, Send, MessageSquare, Sparkles
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { api } from '@/api';
 
-const weeklyTrend = [
-  { day: '周一', minutes: 45 },
-  { day: '周二', minutes: 60 },
-  { day: '周三', minutes: 30 },
-  { day: '周四', minutes: 75 },
-  { day: '周五', minutes: 50 },
-  { day: '周六', minutes: 90 },
-  { day: '周日', minutes: 45 },
-];
+interface LinkedStudent {
+  relation_id: string;
+  student_id: string;
+  name: string;
+  grade: string;
+  avatar: string;
+  streak_days: number;
+  relation_type: string;
+  today_study_time: number;
+  today_questions: number;
+}
 
-const alerts = [
-  { type: 'warning' as const, message: '数学韦达定理掌握度低于50%，建议加强练习', time: '2小时前' },
-  { type: 'success' as const, message: '英语口语练习连续5天达标', time: '昨天' },
-  { type: 'info' as const, message: '本周学习时长395分钟，较上周增加12%', time: '昨天' },
-  { type: 'warning' as const, message: '物理欧姆定律课程未完成', time: '3天前' },
-];
-
-const studyPlan = [
-  { id: '1', title: '完成一元二次方程练习题', subject: '数学', deadline: '2026-05-13', completed: false, priority: 'high' as const },
-  { id: '2', title: '背诵Unit 2单词', subject: '英语', deadline: '2026-05-13', completed: true, priority: 'medium' as const },
-  { id: '3', title: '物理实验报告', subject: '物理', deadline: '2026-05-14', completed: false, priority: 'high' as const },
-  { id: '4', title: '古诗词默写', subject: '语文', deadline: '2026-05-15', completed: false, priority: 'medium' as const },
-];
+interface FamilyMessage {
+  id: string;
+  role: string;
+  content: string;
+  ai_summary: string;
+  created_at: string;
+}
 
 export function ParentDashboard() {
   const [timeLimitEnabled, setTimeLimitEnabled] = useState(true);
   const [restReminder, setRestReminder] = useState(true);
   const [contentFilter, setContentFilter] = useState(true);
+  const [students, setStudents] = useState<LinkedStudent[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<LinkedStudent | null>(null);
+  const [studentReport, setStudentReport] = useState<Record<string, unknown> | null>(null);
+  const [familyMessages, setFamilyMessages] = useState<FamilyMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [linkEmail, setLinkEmail] = useState('');
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const loadStudents = useCallback(async () => {
+    try {
+      const data = await api.get<LinkedStudent[]>('/parent/students');
+      setStudents(data);
+      if (data.length > 0 && !selectedStudent) {
+        setSelectedStudent(data[0]);
+      }
+    } catch {
+      setStudents([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStudents();
+  }, [loadStudents]);
+
+  const loadStudentReport = useCallback(async () => {
+    if (!selectedStudent) return;
+    try {
+      const data = await api.get<Record<string, unknown>>(`/parent/student/${selectedStudent.student_id}/report?days=7`);
+      setStudentReport(data);
+    } catch {
+      setStudentReport(null);
+    }
+  }, [selectedStudent]);
+
+  const loadFamilyChat = useCallback(async () => {
+    if (!selectedStudent) return;
+    try {
+      const data = await api.get<FamilyMessage[]>(`/parent/family-chat/${selectedStudent.student_id}`);
+      setFamilyMessages(data);
+    } catch {
+      setFamilyMessages([]);
+    }
+  }, [selectedStudent]);
+
+  useEffect(() => {
+    if (selectedStudent) {
+      loadStudentReport();
+      loadFamilyChat();
+    }
+  }, [selectedStudent, loadStudentReport, loadFamilyChat]);
+
+  const handleLinkStudent = async () => {
+    if (!linkEmail.trim()) return;
+    setIsLoading(true);
+    try {
+      await api.post('/parent/link', { student_email: linkEmail, relation_type: 'parent' });
+      setLinkEmail('');
+      setShowLinkForm(false);
+      loadStudents();
+    } catch (e) {
+      alert('关联失败：' + (e instanceof Error ? e.message : '未知错误'));
+    }
+    setIsLoading(false);
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedStudent || !newMessage.trim()) return;
+    try {
+      await api.post('/parent/family-chat', {
+        student_id: selectedStudent.student_id,
+        content: newMessage.trim(),
+      });
+      setNewMessage('');
+      loadFamilyChat();
+    } catch {}
+  };
+
+  const weeklyTrend = ((studentReport?.daily_logs || []) as Record<string, unknown>[]).map((log, i) => ({
+    day: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][i] || `Day${i}`,
+    minutes: (log.study_time as number) || 0,
+  }));
+
+  const alerts = [
+    { type: 'warning' as const, message: '数学韦达定理掌握度低于50%，建议加强练习', time: '2小时前' },
+    { type: 'success' as const, message: '英语口语练习连续5天达标', time: '昨天' },
+    { type: 'info' as const, message: '本周学习时长395分钟，较上周增加12%', time: '昨天' },
+  ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -57,29 +143,91 @@ export function ParentDashboard() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center">
-              <span className="text-2xl font-bold">张</span>
+              <span className="text-2xl font-bold">{selectedStudent?.name?.[0] || '?'}</span>
             </div>
             <div>
-              <h3 className="text-xl font-bold">张小明</h3>
-              <p className="text-teal-100">实验中学 · 九年级 · 连续学习7天</p>
+              <h3 className="text-xl font-bold">{selectedStudent?.name || '未选择'}</h3>
+              <p className="text-teal-100">{selectedStudent?.grade || ''} · 连续学习{selectedStudent?.streak_days || 0}天</p>
             </div>
           </div>
           <div className="flex gap-4 text-center">
             <div>
-              <p className="text-2xl font-bold">45<span className="text-sm">分钟</span></p>
+              <p className="text-2xl font-bold">{selectedStudent?.today_study_time || 0}<span className="text-sm">分钟</span></p>
               <p className="text-xs text-teal-100">今日学习</p>
             </div>
             <div>
-              <p className="text-2xl font-bold">28<span className="text-sm">道</span></p>
+              <p className="text-2xl font-bold">{selectedStudent?.today_questions || 0}<span className="text-sm">道</span></p>
               <p className="text-xs text-teal-100">今日答题</p>
             </div>
             <div>
-              <p className="text-2xl font-bold">85<span className="text-sm">%</span></p>
+              <p className="text-2xl font-bold">{studentReport ? Math.round((studentReport.avg_accuracy as number) || 0) : 0}<span className="text-sm">%</span></p>
               <p className="text-xs text-teal-100">正确率</p>
             </div>
           </div>
         </div>
+        {students.length === 0 && (
+          <div className="mt-4 pt-4 border-t border-white/20 text-center">
+            <p className="text-teal-100 mb-2">还没有关联学生账号</p>
+            <Button
+              onClick={() => setShowLinkForm(true)}
+              className="bg-white/20 hover:bg-white/30 text-white rounded-lg"
+            >
+              <Plus className="w-4 h-4 mr-1" /> 关联学生
+            </Button>
+          </div>
+        )}
+        {students.length > 1 && (
+          <div className="mt-4 pt-4 border-t border-white/20 flex gap-2">
+            {students.map(s => (
+              <button
+                key={s.student_id}
+                onClick={() => setSelectedStudent(s)}
+                className={`px-3 py-1 rounded-lg text-sm transition-all ${
+                  selectedStudent?.student_id === s.student_id
+                    ? 'bg-white/30 text-white'
+                    : 'bg-white/10 text-teal-100 hover:bg-white/20'
+                }`}
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        )}
       </motion.div>
+
+      {showLinkForm && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-4"
+        >
+          <h3 className="font-medium text-slate-800 dark:text-white mb-3 flex items-center gap-2">
+            <Link className="w-4 h-4 text-teal-500" /> 关联学生账号
+          </h3>
+          <div className="flex gap-2">
+            <Input
+              value={linkEmail}
+              onChange={e => setLinkEmail(e.target.value)}
+              placeholder="输入学生的注册邮箱"
+              className="flex-1"
+            />
+            <Button
+              onClick={handleLinkStudent}
+              disabled={isLoading}
+              className="bg-teal-600 hover:bg-teal-700 text-white rounded-lg"
+            >
+              关联
+            </Button>
+            <Button
+              onClick={() => { setShowLinkForm(false); setLinkEmail(''); }}
+              variant="outline"
+              className="rounded-lg"
+            >
+              取消
+            </Button>
+          </div>
+        </motion.div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Weekly Trend */}
@@ -176,7 +324,7 @@ export function ParentDashboard() {
           </div>
         </motion.div>
 
-        {/* Study Tasks */}
+        {/* Family Chat */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -184,39 +332,47 @@ export function ParentDashboard() {
           className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-6"
         >
           <h3 className="font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-emerald-500" />
-            学习任务
+            <MessageSquare className="w-5 h-5 text-emerald-500" />
+            家校对话
           </h3>
-          <div className="space-y-3">
-            {studyPlan.map((task) => (
-              <div
-                key={task.id}
-                className={`flex items-center gap-3 p-3 rounded-xl ${
-                  task.completed ? 'bg-green-50 dark:bg-green-900/20' : 'bg-slate-50 dark:bg-slate-700/30'
-                }`}
-              >
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
-                  task.completed ? 'border-green-500 bg-green-500' : 'border-slate-300'
-                }`}>
-                  {task.completed && <CheckCircle className="w-3.5 h-3.5 text-white" />}
-                </div>
-                <div className="flex-1">
-                  <p className={`text-sm ${task.completed ? 'line-through text-slate-400' : 'text-slate-700 dark:text-slate-200'}`}>
-                    {task.title}
+          <div className="space-y-2 max-h-64 overflow-y-auto mb-3">
+            {familyMessages.length === 0 && (
+              <p className="text-sm text-slate-400 text-center py-4">暂无消息，发送第一条鼓励吧</p>
+            )}
+            {familyMessages.map(msg => (
+              <div key={msg.id} className={`p-2.5 rounded-xl text-sm ${
+                msg.role === 'parent'
+                  ? 'bg-teal-50 dark:bg-teal-900/20 ml-4'
+                  : 'bg-slate-50 dark:bg-slate-700/30 mr-4'
+              }`}>
+                <p className="text-slate-700 dark:text-slate-200">{msg.content}</p>
+                {msg.ai_summary && (
+                  <p className="text-xs text-violet-500 mt-1 flex items-center gap-0.5">
+                    <Sparkles className="w-2.5 h-2.5" /> {msg.ai_summary}
                   </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge variant="outline" className="text-xs">{task.subject}</Badge>
-                    <span className="text-xs text-slate-400">截止 {task.deadline}</span>
-                  </div>
-                </div>
-                <Badge className={`${
-                  task.priority === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                }`}>
-                  {task.priority === 'high' ? '高' : '中'}
-                </Badge>
+                )}
               </div>
             ))}
           </div>
+          {selectedStudent && (
+            <div className="flex gap-2">
+              <Input
+                value={newMessage}
+                onChange={e => setNewMessage(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                placeholder="发送消息给孩子..."
+                className="flex-1 h-9"
+              />
+              <Button
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim()}
+                size="sm"
+                className="rounded-lg bg-teal-600 hover:bg-teal-700 text-white"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
         </motion.div>
       </div>
 

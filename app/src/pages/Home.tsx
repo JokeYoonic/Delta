@@ -6,12 +6,19 @@ import { Classroom } from '@/sections/Classroom';
 import { ExamCenter } from '@/sections/ExamCenter';
 import { SpeakingLab } from '@/sections/SpeakingLab';
 import { KnowledgeMap } from '@/sections/KnowledgeMap';
+import { MemoryBooks } from '@/sections/MemoryBooks';
 import { StudyReport } from '@/sections/StudyReport';
 import { ParentDashboard } from '@/sections/ParentDashboard';
 import { UserProfile } from '@/sections/UserProfile';
+import { LoginPage } from '@/sections/LoginPage';
 
 export default function Home() {
   const currentPage = useStore((s) => s.currentPage);
+  const isAuthenticated = useStore((s) => s.isAuthenticated);
+
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
 
   const renderPage = () => {
     switch (currentPage) {
@@ -21,6 +28,7 @@ export default function Home() {
       case 'exam': return <ExamCenter />;
       case 'speaking': return <SpeakingLab />;
       case 'knowledge': return <KnowledgeMap />;
+      case 'memory': return <MemoryBooks />;
       case 'report': return <StudyReport />;
       case 'parent': return <ParentDashboard />;
       case 'profile': return <UserProfile />;

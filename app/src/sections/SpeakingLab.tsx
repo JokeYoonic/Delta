@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Mic2, Play, Square, RotateCcw, Volume2, VolumeX,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { voiceApi, speakingApi } from '@/api';
 import type { SpeakingRole, SpeakingScene, SpeakingMessage } from '@/types';
 
 type SpeakingView = 'setup' | 'session' | 'result';
@@ -46,11 +47,18 @@ export function SpeakingLab() {
   const [messages, setMessages] = useState<SpeakingMessage[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isAiResponding, setIsAiResponding] = useState(false);
   const [sessionTime, setSessionTime] = useState(0);
   const [inputText, setInputText] = useState('');
   const [pronunciationScore, setPronunciationScore] = useState(82);
   const [fluencyScore, setFluencyScore] = useState(75);
   const [accuracyScore, setAccuracyScore] = useState(88);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [evaluation, setEvaluation] = useState<Record<string, unknown> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pendingAiMsgIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
@@ -60,12 +68,102 @@ export function SpeakingLab() {
     return () => clearInterval(timer);
   }, [view]);
 
-  const startSession = () => {
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
+
+  const connectWebSocket = useCallback((): Promise<WebSocket> => {
+    return new Promise((resolve, reject) => {
+      try {
+        const ws = speakingApi.createWebSocket();
+        ws.onopen = () => resolve(ws);
+        ws.onerror = () => reject(new Error('WebSocket connection failed'));
+        wsRef.current = ws;
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }, []);
+
+  const startSession = useCallback(async () => {
     setMessages([]);
     setSessionTime(0);
+    setEvaluation(null);
     setView('session');
 
-    setTimeout(() => {
+    try {
+      const session = await speakingApi.createSession({
+        role: selectedRole,
+        scene: selectedScene,
+        topic: selectedTopic,
+      });
+      setSessionId((session as Record<string, unknown>).id as string);
+    } catch {
+      // session creation is optional
+    }
+
+    try {
+      const ws = await connectWebSocket();
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'greeting') {
+          const aiMsg: SpeakingMessage = {
+            id: `msg-${Date.now()}`,
+            role: 'ai',
+            text: data.content,
+            timestamp: Date.now(),
+          };
+          setMessages(prev => [...prev, aiMsg]);
+        }
+
+        if (data.type === 'chunk') {
+          setIsAiResponding(true);
+          if (!pendingAiMsgIdRef.current) {
+            const msgId = `msg-${Date.now()}`;
+            pendingAiMsgIdRef.current = msgId;
+            const aiMsg: SpeakingMessage = {
+              id: msgId,
+              role: 'ai',
+              text: data.content,
+              timestamp: Date.now(),
+            };
+            setMessages(prev => [...prev, aiMsg]);
+          } else {
+            setMessages(prev => prev.map(m =>
+              m.id === pendingAiMsgIdRef.current
+                ? { ...m, text: m.text + data.content }
+                : m
+            ));
+          }
+        }
+
+        if (data.type === 'done') {
+          setIsAiResponding(false);
+          pendingAiMsgIdRef.current = null;
+        }
+
+        if (data.type === 'evaluation') {
+          setEvaluation(data.data);
+        }
+
+        if (data.type === 'error') {
+          setIsAiResponding(false);
+          pendingAiMsgIdRef.current = null;
+        }
+      };
+
+      ws.send(JSON.stringify({
+        type: 'init',
+        scene: selectedScene,
+        role: selectedRole,
+      }));
+    } catch {
       const opening = mockDialogues[selectedTopic]?.[0] || `Let's practice ${selectedTopic}. How are you today?`;
       const aiMsg: SpeakingMessage = {
         id: `msg-${Date.now()}`,
@@ -74,10 +172,68 @@ export function SpeakingLab() {
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, aiMsg]);
-    }, 1000);
-  };
+    }
+  }, [selectedRole, selectedScene, selectedTopic, connectWebSocket]);
 
-  const sendMessage = (text: string) => {
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        stream.getTracks().forEach(track => track.stop());
+
+        try {
+          const sttResult = await voiceApi.stt(audioBlob);
+          const recognizedText = (sttResult as Record<string, unknown>).text as string;
+          if (recognizedText) {
+            sendMessage(recognizedText);
+          }
+        } catch {
+          // STT failed, user can type instead
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch {
+      setIsRecording(false);
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  }, [isRecording]);
+
+  const playTTS = useCallback(async (text: string) => {
+    setIsPlaying(true);
+    try {
+      const audioBlob = await voiceApi.tts(text);
+      const url = URL.createObjectURL(audioBlob);
+      const audio = new Audio(url);
+      audio.onended = () => {
+        setIsPlaying(false);
+        URL.revokeObjectURL(url);
+      };
+      audio.play();
+    } catch {
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const sendMessage = useCallback((text: string) => {
     if (!text.trim()) return;
     const userMsg: SpeakingMessage = {
       id: `msg-${Date.now()}`,
@@ -88,10 +244,15 @@ export function SpeakingLab() {
     setMessages(prev => [...prev, userMsg]);
     setInputText('');
 
-    setTimeout(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'chat',
+        content: text.trim(),
+      }));
+    } else {
       const responses = mockDialogues[selectedTopic];
       const aiText = responses
-        ? responses[messages.length % responses.length]
+        ? responses[(messages.length + 1) % responses.length]
         : 'That\'s great! Let\'s continue practicing. Can you tell me more?';
       const aiMsg: SpeakingMessage = {
         id: `msg-${Date.now() + 1}`,
@@ -100,15 +261,33 @@ export function SpeakingLab() {
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, aiMsg]);
-    }, 1500);
-  };
+    }
+  }, [selectedTopic, messages.length]);
 
-  const endSession = () => {
-    setPronunciationScore(75 + Math.floor(Math.random() * 20));
-    setFluencyScore(70 + Math.floor(Math.random() * 20));
-    setAccuracyScore(80 + Math.floor(Math.random() * 15));
+  const endSession = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const userMessages = messages.filter(m => m.role === 'user');
+      const lastUserText = userMessages.length > 0 ? userMessages[userMessages.length - 1].text : '';
+      wsRef.current.send(JSON.stringify({
+        type: 'evaluate',
+        text: lastUserText,
+      }));
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    if (evaluation) {
+      const evalData = evaluation as Record<string, number>;
+      setPronunciationScore(Math.round(evalData.fluency * 10) || 75 + Math.floor(Math.random() * 20));
+      setFluencyScore(Math.round(evalData.fluency * 10) || 70 + Math.floor(Math.random() * 20));
+      setAccuracyScore(Math.round(evalData.grammar * 10) || 80 + Math.floor(Math.random() * 15));
+    } else {
+      setPronunciationScore(75 + Math.floor(Math.random() * 20));
+      setFluencyScore(70 + Math.floor(Math.random() * 20));
+      setAccuracyScore(80 + Math.floor(Math.random() * 15));
+    }
     setView('result');
-  };
+  }, [messages, evaluation]);
 
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
@@ -211,12 +390,14 @@ export function SpeakingLab() {
                   onChange={e => setInputText(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && sendMessage(inputText)}
                   placeholder={isRecording ? '正在录音...' : '输入文字或按住麦克风说话...'}
+                  data-testid="speaking-input"
                   className="flex-1 bg-transparent border-0 py-3 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none"
                 />
               </div>
               <Button
                 onClick={() => sendMessage(inputText)}
                 size="sm"
+                data-testid="speaking-send-btn"
                 className="rounded-xl bg-violet-600 hover:bg-violet-700"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -474,6 +655,7 @@ export function SpeakingLab() {
         <Button
           onClick={startSession}
           size="lg"
+          data-testid="start-speaking-session"
           className="rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-700 hover:to-blue-700 text-white px-8 py-6 text-lg"
         >
           <Play className="w-5 h-5 mr-2" />

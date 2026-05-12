@@ -8,6 +8,9 @@ interface AppState {
   // User
   user: User | null;
   setUser: (user: User | null) => void;
+  isAuthenticated: boolean;
+  setIsAuthenticated: (auth: boolean) => void;
+  isSuperAdmin: boolean;
 
   // Navigation
   currentPage: string;
@@ -183,17 +186,37 @@ const mockSubjects: Subject[] = [
 
 export const useStore = create<AppState>((set, get) => ({
   // User
-  user: {
-    id: '1',
-    name: '张小明',
-    avatar: '',
-    grade: '九年级',
-    school: '实验中学',
-    role: 'student',
-    points: 1250,
-    streakDays: 7,
+  user: (() => {
+    try {
+      const saved = localStorage.getItem('delta_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  })(),
+  setUser: (user) => {
+    if (user) {
+      localStorage.setItem('delta_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('delta_user');
+    }
+    set({ user, isSuperAdmin: user?.role === 'superadmin' });
   },
-  setUser: (user) => set({ user }),
+  isAuthenticated: (() => {
+    return !!localStorage.getItem('delta_token');
+  })(),
+  setIsAuthenticated: (auth) => {
+    if (!auth) {
+      localStorage.removeItem('delta_token');
+      localStorage.removeItem('delta_user');
+    }
+    set({ isAuthenticated: auth });
+  },
+  isSuperAdmin: (() => {
+    try {
+      const saved = localStorage.getItem('delta_user');
+      const user = saved ? JSON.parse(saved) : null;
+      return user?.role === 'superadmin';
+    } catch { return false; }
+  })(),
 
   // Navigation
   currentPage: 'dashboard',

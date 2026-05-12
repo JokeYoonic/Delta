@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   LayoutDashboard, MessageSquare, GraduationCap, ClipboardCheck,
   Mic2, Network, BarChart3, Users, UserCircle, ChevronLeft, ChevronRight,
-  Sparkles
+  Sparkles, Bookmark
 } from 'lucide-react';
 
 const navItems = [
@@ -13,6 +13,7 @@ const navItems = [
   { id: 'exam', label: '考试中心', icon: ClipboardCheck, color: 'text-orange-600' },
   { id: 'speaking', label: '口语训练', icon: Mic2, color: 'text-pink-600' },
   { id: 'knowledge', label: '知识图谱', icon: Network, color: 'text-cyan-600' },
+  { id: 'memory', label: '知识笔记', icon: Bookmark, color: 'text-indigo-600' },
   { id: 'report', label: '学情报告', icon: BarChart3, color: 'text-amber-600' },
   { id: 'parent', label: '家长监管', icon: Users, color: 'text-teal-600' },
   { id: 'profile', label: '个人中心', icon: UserCircle, color: 'text-slate-600' },
@@ -60,6 +61,7 @@ export function Sidebar() {
             <button
               key={item.id}
               onClick={() => setCurrentPage(item.id)}
+              data-testid={`${item.id}-tab`}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${
                 isActive
                   ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300'

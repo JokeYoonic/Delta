@@ -1,14 +1,44 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Image, Mic, Paperclip, Sparkles, User, Bot, BookOpen,
   Lightbulb, HelpCircle, ThumbsUp, ThumbsDown,
-  Copy, Check, Wand2
+  Copy, Check, Wand2, Camera, Users, Settings2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import type { ChatMessage } from '@/types';
+import { conversationApi, ocrApi, agentsApi, tutorApi } from '@/api';
+import { useStreamingChat } from '@/hooks/useStreamingChat';
+import type { ChatMessage, RAGSource } from '@/types';
+
+const agentRoles = [
+  { role: 'gentle', name: '温柔学姐', icon: '👩‍🎓', desc: '耐心鼓励，循序渐进' },
+  { role: 'strict', name: '严厉老师', icon: '👨‍🏫', desc: '严格要求，精准纠错' },
+  { role: 'peer', name: '同龄学伴', icon: '🧑‍🤝‍🧑', desc: '轻松讨论，共同探索' },
+  { role: 'foreign', name: '外教', icon: '🌍', desc: '全英对话，文化拓展' },
+];
+
+const depthOptions = [
+  { value: 1, label: '极简', desc: '仅结论' },
+  { value: 2, label: '简要', desc: '结论+推理' },
+  { value: 3, label: '标准', desc: '推理+类比' },
+  { value: 4, label: '详细', desc: '多角度+反例' },
+  { value: 5, label: '深度', desc: '深度推导+边界' },
+];
+
+const learningStyleOptions = [
+  { value: 'visual', label: '视觉型', icon: '👁️' },
+  { value: 'auditory', label: '听觉型', icon: '👂' },
+  { value: 'kinesthetic', label: '动觉型', icon: '✋' },
+  { value: 'reading', label: '阅读型', icon: '📖' },
+];
+
+const commStyleOptions = [
+  { value: 'socratic', label: '苏格拉底式', desc: '提问引导' },
+  { value: 'direct', label: '直接式', desc: '清晰解释' },
+  { value: 'storytelling', label: '故事式', desc: '场景包装' },
+];
 
 const suggestions = [
   { icon: HelpCircle, text: '一元二次方程的求根公式是什么？' },
@@ -17,25 +47,28 @@ const suggestions = [
   { icon: Wand2, text: '检查我的作文：The Importance of...' },
 ];
 
-const mockAIResponse = (userMsg: string): string => {
-  const responses: Record<string, string> = {
-    '一元二次方程': '一元二次方程的标准形式是 **ax² + bx + c = 0**（a≠0）。\n\n求根公式为：\n**x = (-b ± √(b²-4ac)) / 2a**\n\n其中：\n- **b²-4ac > 0**：方程有两个不相等的实数根\n- **b²-4ac = 0**：方程有两个相等的实数根\n- **b²-4ac < 0**：方程没有实数根\n\n你想通过什么方法来深入理解这个知识点呢？我可以给你出几道练习题。',
-    '求根公式': '求根公式是解一元二次方程的万能方法：\n\n**x = (-b ± √(b²-4ac)) / 2a**\n\n让我用一个例子来说明：\n\n解方程：2x² - 4x - 6 = 0\n\n这里 a=2, b=-4, c=-6\n\n代入公式：\nx = (4 ± √(16+48)) / 4\nx = (4 ± √64) / 4\nx = (4 ± 8) / 4\n\n所以 x₁ = 3, x₂ = -1\n\n你想自己试试解一道类似的题目吗？',
-  };
-
-  for (const [key, value] of Object.entries(responses)) {
-    if (userMsg.includes(key)) return value;
-  }
-
-  return `好的，我来帮你分析这个问题。\n\n**问题理解**：${userMsg}\n\n让我用苏格拉底式引导法来帮助你：\n\n1️⃣ **首先**，你能告诉我这个问题涉及哪个知识点吗？\n\n2️⃣ **其次**，你还记得相关的公式或定理吗？\n\n3️⃣ **最后**，试着一步步分析，我来看看你的思路。\n\n不用担心答错，学习就是一个不断试错的过程！你想从哪个角度开始思考呢？`;
-};
-
 export function AIChat() {
-  const { currentConversation, createConversation, addMessage, setIsTyping, isTyping } = useStore();
+  const { currentConversation, createConversation, addMessage, setIsTyping, isTyping, setCurrentConversation } = useStore();
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [streamingSources, setStreamingSources] = useState<RAGSource[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('');
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [showTutorConfig, setShowTutorConfig] = useState(false);
+  const [tutorConfig, setTutorConfig] = useState({
+    depth: 3,
+    learning_style: 'visual',
+    communication_style: 'socratic',
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const { sendMessage: wsSendMessage, connect, disconnect, isStreaming } = useStreamingChat();
+
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
 
   useEffect(() => {
     if (!currentConversation) {
@@ -45,9 +78,9 @@ export function AIChat() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentConversation?.messages, isTyping]);
+  }, [currentConversation?.messages, isTyping, streamingContent]);
 
-  const handleSend = () => {
+  const handleSend = useCallback(async () => {
     if (!input.trim() || isTyping) return;
 
     const userMsg: ChatMessage = {
@@ -59,22 +92,119 @@ export function AIChat() {
     };
 
     addMessage(userMsg);
+    const msgContent = input.trim();
     setInput('');
     setIsTyping(true);
+    setStreamingContent('');
+    setStreamingSources([]);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const aiMsg: ChatMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: 'assistant',
-        content: mockAIResponse(userMsg.content),
-        timestamp: Date.now(),
-        type: 'text',
-      };
-      addMessage(aiMsg);
+    try {
+      let conv = currentConversation;
+      if (!conv) {
+        conv = createConversation('数学');
+      }
+
+      const aiMsgId = `msg-${Date.now() + 1}`;
+      let fullContent = '';
+
+      await new Promise<void>((resolve, reject) => {
+        const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/^http/, 'ws');
+        const token = localStorage.getItem('delta_token');
+        const ws = new WebSocket(`${wsBase}/chat/ws/${token}`);
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({
+            type: 'init',
+            conversation_id: conv!.id,
+            ...(selectedAgent ? { agent_role: selectedAgent } : {}),
+            tutor_config: tutorConfig,
+          }));
+          ws.send(JSON.stringify({
+            type: 'chat',
+            content: msgContent,
+            conversation_id: conv!.id,
+            history: conv!.messages.map(m => ({ role: m.role, content: m.content })),
+            ...(selectedAgent ? { agent_role: selectedAgent } : {}),
+            tutor_config: tutorConfig,
+          }));
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          if (data.type === 'chunk' && data.content) {
+            fullContent += data.content;
+            setStreamingContent(fullContent);
+          } else if (data.type === 'done') {
+            const aiMsg: ChatMessage = {
+              id: aiMsgId,
+              role: 'assistant',
+              content: data.content || fullContent,
+              timestamp: Date.now(),
+              type: 'text',
+              ragSources: data.data?.rag_sources || [],
+            };
+            addMessage(aiMsg);
+            setStreamingContent('');
+            setStreamingSources([]);
+            setIsTyping(false);
+            ws.close();
+            resolve();
+          } else if (data.type === 'error') {
+            setIsTyping(false);
+            setStreamingContent('');
+            ws.close();
+            reject(new Error(data.message || 'Stream error'));
+          }
+        };
+
+        ws.onerror = () => {
+          setIsTyping(false);
+          setStreamingContent('');
+          ws.close();
+          reject(new Error('WebSocket connection error'));
+        };
+
+        setTimeout(() => {
+          if (ws.readyState !== WebSocket.CLOSED) {
+            ws.close();
+          }
+          resolve();
+        }, 60000);
+      });
+    } catch {
+      if (!streamingContent) {
+        const fallbackMsg: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          role: 'assistant',
+          content: '抱歉，连接出现问题。请检查网络连接后重试。',
+          timestamp: Date.now(),
+          type: 'text',
+        };
+        addMessage(fallbackMsg);
+      }
+      setStreamingContent('');
       setIsTyping(false);
-    }, 1500 + Math.random() * 1000);
-  };
+    }
+  }, [input, isTyping, currentConversation, addMessage, setIsTyping, createConversation, streamingContent]);
+
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const base64 = (ev.target?.result as string).split(',')[1];
+      try {
+        const result = await ocrApi.recognize(base64);
+        if (result.text) {
+          setInput(result.text);
+        }
+      } catch {
+        setInput('图片识别失败，请手动输入题目');
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -220,6 +350,30 @@ export function AIChat() {
                           </button>
                         </div>
                       )}
+                      {msg.role === 'assistant' && msg.ragSources && msg.ragSources.length > 0 && (
+                        <div className="mt-1.5 pt-1.5 border-t border-slate-200/50 dark:border-slate-600/50">
+                          <p className="text-[10px] text-slate-400 mb-1 flex items-center gap-1">
+                            <BookOpen className="w-2.5 h-2.5" /> 知识来源
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {msg.ragSources.map((src, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-blue-50 dark:bg-blue-900/20 text-[10px] text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-800"
+                                title={src.content_preview}
+                              >
+                                <BookOpen className="w-2 h-2" />
+                                {src.document || `来源${idx + 1}`}
+                                {src.similarity > 0 && (
+                                  <span className="text-blue-400 dark:text-blue-500 ml-0.5">
+                                    {Math.round(src.similarity * 100)}%
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     {msg.role === 'user' && (
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center flex-shrink-0 mt-1">
@@ -230,8 +384,8 @@ export function AIChat() {
                 ))}
               </AnimatePresence>
 
-              {/* Typing Indicator */}
-              {isTyping && (
+              {/* Typing Indicator / Streaming Content */}
+              {isTyping && !streamingContent && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -261,6 +415,21 @@ export function AIChat() {
                   </div>
                 </motion.div>
               )}
+              {isTyping && streamingContent && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="flex gap-3"
+                >
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center flex-shrink-0 mt-1">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="max-w-[80%] p-3.5 rounded-2xl rounded-bl-md bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-sm leading-relaxed">
+                    {renderMessageContent({ id: 'streaming', role: 'assistant', content: streamingContent, timestamp: Date.now(), type: 'text' })}
+                    <span className="inline-block w-1.5 h-4 bg-violet-500 animate-pulse ml-0.5 align-text-bottom" />
+                  </div>
+                </motion.div>
+              )}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -269,11 +438,139 @@ export function AIChat() {
         {/* Input Area */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-700">
           <div className="max-w-3xl mx-auto">
+            {showAgentPicker && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg"
+              >
+                <p className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
+                  <Users className="w-3 h-3" /> 选择AI教学角色
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {agentRoles.map((agent) => (
+                    <button
+                      key={agent.role}
+                      onClick={() => {
+                        setSelectedAgent(agent.role === selectedAgent ? '' : agent.role);
+                        setShowAgentPicker(false);
+                      }}
+                      className={`flex flex-col items-center gap-1 p-2.5 rounded-xl text-xs transition-all ${
+                        selectedAgent === agent.role
+                          ? 'bg-violet-100 dark:bg-violet-900/30 border-2 border-violet-400 dark:border-violet-600'
+                          : 'bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 hover:border-violet-300'
+                      }`}
+                    >
+                      <span className="text-lg">{agent.icon}</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-200">{agent.name}</span>
+                      <span className="text-slate-400 text-[10px]">{agent.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            {showTutorConfig && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-3 p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-medium text-slate-500 flex items-center gap-1">
+                    <Settings2 className="w-3 h-3" /> 教学偏好设置
+                  </p>
+                  <button
+                    onClick={() => setShowTutorConfig(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >✕</button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1.5">讲解深度</p>
+                    <div className="flex gap-1">
+                      {depthOptions.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setTutorConfig({ ...tutorConfig, depth: opt.value })}
+                          className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-medium transition-all ${
+                            tutorConfig.depth === opt.value
+                              ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-600'
+                              : 'bg-slate-50 dark:bg-slate-700/50 text-slate-500 border border-transparent hover:border-slate-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1.5">学习风格</p>
+                    <div className="flex gap-1">
+                      {learningStyleOptions.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setTutorConfig({ ...tutorConfig, learning_style: opt.value })}
+                          className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-medium transition-all flex items-center justify-center gap-1 ${
+                            tutorConfig.learning_style === opt.value
+                              ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-600'
+                              : 'bg-slate-50 dark:bg-slate-700/50 text-slate-500 border border-transparent hover:border-slate-200'
+                          }`}
+                        >
+                          <span>{opt.icon}</span> {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1.5">沟通方式</p>
+                    <div className="flex gap-1">
+                      {commStyleOptions.map(opt => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setTutorConfig({ ...tutorConfig, communication_style: opt.value })}
+                          className={`flex-1 py-1.5 px-1 rounded-lg text-[10px] font-medium transition-all ${
+                            tutorConfig.communication_style === opt.value
+                              ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-600'
+                              : 'bg-slate-50 dark:bg-slate-700/50 text-slate-500 border border-transparent hover:border-slate-200'
+                          }`}
+                        >
+                          {opt.label}
+                          <span className="block text-[8px] text-slate-400">{opt.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
             <div className="flex items-end gap-2 bg-slate-100 dark:bg-slate-700/50 rounded-2xl p-2">
               <div className="flex gap-1">
-                <button className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500">
-                  <Image className="w-4 h-4" />
+                <button
+                  onClick={() => setShowAgentPicker(!showAgentPicker)}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    selectedAgent
+                      ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600'
+                      : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600'
+                  }`}
+                  title="选择AI角色"
+                >
+                  <Users className="w-4 h-4" />
                 </button>
+                <button
+                  onClick={() => setShowTutorConfig(!showTutorConfig)}
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
+                    showTutorConfig
+                      ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-600'
+                      : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-600'
+                  }`}
+                  title="教学偏好设置"
+                >
+                  <Settings2 className="w-4 h-4" />
+                </button>
+                <label className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500 cursor-pointer">
+                  <Camera className="w-4 h-4" />
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+                </label>
                 <button className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500">
                   <Mic className="w-4 h-4" />
                 </button>
@@ -286,8 +583,13 @@ export function AIChat() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="输入你的问题，AI会通过引导帮你思考..."
+                placeholder={
+                  selectedAgent
+                    ? `${agentRoles.find(a => a.role === selectedAgent)?.name}模式 · 输入你的问题...`
+                    : '输入你的问题，AI会通过引导帮你思考...'
+                }
                 rows={1}
+                data-testid="chat-input"
                 className="flex-1 bg-transparent border-0 resize-none py-2 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-0 max-h-32"
                 style={{ minHeight: '2rem' }}
               />
@@ -295,14 +597,27 @@ export function AIChat() {
                 onClick={handleSend}
                 disabled={!input.trim() || isTyping}
                 size="sm"
+                data-testid="send-btn"
                 className="rounded-xl bg-violet-600 hover:bg-violet-700 text-white px-4 disabled:opacity-50"
               >
                 <Send className="w-4 h-4" />
               </Button>
             </div>
-            <p className="text-center text-xs text-slate-400 mt-2">
-              AI可能产生错误，关键知识点请以教材为准 · 支持 Shift+Enter 换行
-            </p>
+            <div className="flex items-center justify-between mt-2">
+              <p className="text-center text-xs text-slate-400">
+                AI可能产生错误，关键知识点请以教材为准 · 支持 Shift+Enter 换行
+              </p>
+              {selectedAgent && (
+                <span className="text-xs text-violet-500 flex items-center gap-1">
+                  {agentRoles.find(a => a.role === selectedAgent)?.icon}
+                  {agentRoles.find(a => a.role === selectedAgent)?.name}模式
+                  <button
+                    onClick={() => setSelectedAgent('')}
+                    className="ml-1 text-slate-400 hover:text-slate-600"
+                  >✕</button>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

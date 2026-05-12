@@ -1,17 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   GraduationCap, Play, Lock, CheckCircle, ChevronRight,
-  BookOpen, Target, Clock, Star, FileQuestion, Lightbulb,
-  ArrowLeft
+  Clock, Lightbulb, ArrowLeft, Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { classroomApi } from '@/api';
 
 type ClassroomView = 'list' | 'learning' | 'summary';
+
+interface TeachingStep {
+  key: string;
+  label: string;
+}
 
 interface Lesson {
   id: string;
@@ -22,110 +27,187 @@ interface Lesson {
   completed: boolean;
   locked: boolean;
   progress: number;
-  examples: Example[];
-  exercises: Exercise[];
 }
 
-interface Example {
-  id: string;
-  question: string;
-  solution: string;
-  steps: string[];
-}
-
-interface Exercise {
-  id: string;
-  question: string;
-  options?: string[];
-  answer: string;
-  explanation: string;
-}
-
-const mockLessons: Lesson[] = [
-  {
-    id: 'l1', title: '一元二次方程的概念', description: '理解一元二次方程的定义和一般形式',
-    duration: 15, knowledgePoints: ['一元二次方程定义', '一般形式'], completed: true, locked: false, progress: 100,
-    examples: [
-      { id: 'e1', question: '判断：x² + 3x - 4 = 0 是一元二次方程吗？',
-        solution: '是的，因为它满足一元二次方程的三个条件：①只有一个未知数x；②未知数的最高次数是2；③是整式方程。',
-        steps: ['确定未知数个数：只有x', '确定最高次数：2次', '确认是整式方程'] },
-    ],
-    exercises: [
-      { id: 'ex1', question: '下列方程中，是一元二次方程的是（ ）',
-        options: ['x + 2 = 0', 'x² - 3x + 2 = 0', 'x³ + x = 0', '1/x + x = 2'],
-        answer: 'x² - 3x + 2 = 0', explanation: '一元二次方程必须满足：一个未知数、最高次数为2、整式方程' },
+const subjectChapters: Record<string, { title: string; lessons: Lesson[] }> = {
+  '数学': {
+    title: '一元二次方程',
+    lessons: [
+      { id: 'l1', title: '一元二次方程的概念', description: '理解一元二次方程的定义和一般形式', duration: 15, knowledgePoints: ['一元二次方程定义', '一般形式'], completed: false, locked: false, progress: 0 },
+      { id: 'l2', title: '直接开平方法', description: '利用平方根的定义解形如x²=p的方程', duration: 20, knowledgePoints: ['直接开平方法', '平方根'], completed: false, locked: false, progress: 0 },
+      { id: 'l3', title: '配方法', description: '通过配方将方程化为完全平方形式', duration: 25, knowledgePoints: ['配方法', '完全平方公式'], completed: false, locked: false, progress: 0 },
+      { id: 'l4', title: '公式法', description: '掌握万能求根公式的推导和应用', duration: 30, knowledgePoints: ['求根公式', '判别式'], completed: false, locked: true, progress: 0 },
+      { id: 'l5', title: '因式分解法', description: '将方程左边分解为两个一次因式', duration: 25, knowledgePoints: ['因式分解', '十字相乘法'], completed: false, locked: true, progress: 0 },
+      { id: 'l6', title: '根的判别式', description: '利用判别式判断方程根的情况', duration: 20, knowledgePoints: ['判别式', '根的情况'], completed: false, locked: true, progress: 0 },
     ],
   },
-  {
-    id: 'l2', title: '直接开平方法', description: '利用平方根的定义解形如x²=p的方程',
-    duration: 20, knowledgePoints: ['直接开平方法', '平方根'], completed: false, locked: false, progress: 50,
-    examples: [
-      { id: 'e2', question: '解方程：x² = 9',
-        solution: 'x = ±√9 = ±3，所以 x₁ = 3, x₂ = -3',
-        steps: ['写成 x² = p 的形式', '两边开平方：x = ±√p', '写出两个根'] },
-    ],
-    exercises: [
-      { id: 'ex2', question: '方程 (x-2)² = 16 的解为（ ）',
-        options: ['x=6', 'x=-2', 'x₁=6, x₂=-2', 'x₁=-6, x₂=2'],
-        answer: 'x₁=6, x₂=-2', explanation: 'x-2=±4，所以x=2±4，即x₁=6, x₂=-2' },
+  '英语': {
+    title: '时态与语态',
+    lessons: [
+      { id: 'e1', title: '一般现在时', description: '掌握一般现在时的构成和用法', duration: 20, knowledgePoints: ['一般现在时', '第三人称单数'], completed: false, locked: false, progress: 0 },
+      { id: 'e2', title: '一般过去时', description: '掌握一般过去时的构成和用法', duration: 20, knowledgePoints: ['一般过去时', '规则/不规则动词'], completed: false, locked: false, progress: 0 },
+      { id: 'e3', title: '现在进行时', description: '掌握现在进行时的构成和用法', duration: 20, knowledgePoints: ['现在进行时', 'be+doing'], completed: false, locked: false, progress: 0 },
     ],
   },
-  {
-    id: 'l3', title: '配方法', description: '通过配方将方程化为完全平方形式',
-    duration: 25, knowledgePoints: ['配方法', '完全平方公式'], completed: false, locked: false, progress: 0,
-    examples: [
-      { id: 'e3', question: '用配方法解方程：x² + 6x + 5 = 0',
-        solution: 'x² + 6x + 9 - 9 + 5 = 0 → (x+3)² = 4 → x+3 = ±2 → x₁=-1, x₂=-5',
-        steps: ['移项：x² + 6x = -5', '配方：x² + 6x + 9 = -5 + 9', '写成完全平方：(x+3)² = 4', '开平方求解'] },
-    ],
-    exercises: [
-      { id: 'ex3', question: '用配方法解方程 x² - 4x + 1 = 0，配方后得（ ）',
-        options: ['(x-2)²=3', '(x+2)²=3', '(x-2)²=5', '(x+2)²=5'],
-        answer: '(x-2)²=3', explanation: 'x²-4x+4-4+1=0 → (x-2)²=3' },
+  '语文': {
+    title: '古诗词鉴赏',
+    lessons: [
+      { id: 'c1', title: '唐诗鉴赏', description: '学习唐诗的鉴赏方法', duration: 25, knowledgePoints: ['意象分析', '情感把握'], completed: false, locked: false, progress: 0 },
+      { id: 'c2', title: '宋词鉴赏', description: '学习宋词的鉴赏方法', duration: 25, knowledgePoints: ['豪放派', '婉约派'], completed: false, locked: false, progress: 0 },
     ],
   },
-  {
-    id: 'l4', title: '公式法（求根公式）', description: '掌握万能求根公式的推导和应用',
-    duration: 30, knowledgePoints: ['求根公式', '判别式'], completed: false, locked: true, progress: 0,
-    examples: [], exercises: [],
+  '物理': {
+    title: '力学基础',
+    lessons: [
+      { id: 'p1', title: '牛顿第一定律', description: '理解惯性和力的关系', duration: 20, knowledgePoints: ['惯性', '牛顿第一定律'], completed: false, locked: false, progress: 0 },
+      { id: 'p2', title: '牛顿第二定律', description: '掌握F=ma的应用', duration: 25, knowledgePoints: ['加速度', '牛顿第二定律'], completed: false, locked: false, progress: 0 },
+    ],
   },
-  {
-    id: 'l5', title: '因式分解法', description: '将方程左边分解为两个一次因式',
-    duration: 25, knowledgePoints: ['因式分解', '十字相乘法'], completed: false, locked: true, progress: 0,
-    examples: [], exercises: [],
+  '化学': {
+    title: '化学键',
+    lessons: [
+      { id: 'h1', title: '离子键', description: '理解离子键的形成和特征', duration: 20, knowledgePoints: ['离子键', '电子转移'], completed: false, locked: false, progress: 0 },
+      { id: 'h2', title: '共价键', description: '理解共价键的形成和特征', duration: 20, knowledgePoints: ['共价键', '电子共用'], completed: false, locked: false, progress: 0 },
+    ],
   },
-  {
-    id: 'l6', title: '根的判别式', description: '利用判别式判断方程根的情况',
-    duration: 20, knowledgePoints: ['判别式', '根的情况'], completed: false, locked: true, progress: 0,
-    examples: [], exercises: [],
-  },
-];
+};
 
 export function Classroom() {
   const [view, setView] = useState<ClassroomView>('list');
+  const [selectedSubject, setSelectedSubject] = useState('数学');
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [showExample, setShowExample] = useState(false);
-  const [exerciseAnswer, setExerciseAnswer] = useState('');
-  const [showExerciseResult, setShowExerciseResult] = useState(false);
+  const [currentStepIdx, setCurrentStepIdx] = useState(0);
+  const [stepContent, setStepContent] = useState<string>('');
+  const [isLoadingStep, setIsLoadingStep] = useState(false);
+  const [teachingSteps, setTeachingSteps] = useState<TeachingStep[]>([
+    { key: 'objectives', label: '学习目标' },
+    { key: 'explain', label: '概念讲解' },
+    { key: 'examples', label: '典型例题' },
+    { key: 'practice', label: '随堂练习' },
+    { key: 'summary', label: '课堂总结' },
+  ]);
+  const [askInput, setAskInput] = useState('');
+  const [askResponse, setAskResponse] = useState('');
+  const [isAsking, setIsAsking] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const pendingContentRef = useRef<string>('');
   const { setCurrentPage } = useStore();
 
-  const startLesson = (lesson: Lesson) => {
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
+
+  const connectClassroomWs = useCallback((): Promise<WebSocket> => {
+    return new Promise((resolve, reject) => {
+      try {
+        const ws = classroomApi.createWebSocket();
+        ws.onopen = () => resolve(ws);
+        ws.onerror = () => reject(new Error('WebSocket connection failed'));
+        wsRef.current = ws;
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }, []);
+
+  const startLesson = useCallback(async (lesson: Lesson) => {
     setSelectedLesson(lesson);
-    setCurrentStep(0);
-    setShowExample(false);
-    setExerciseAnswer('');
-    setShowExerciseResult(false);
+    setCurrentStepIdx(0);
+    setStepContent('');
+    setAskResponse('');
     setView('learning');
-  };
+
+    try {
+      const ws = await connectClassroomWs();
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'step_start') {
+          setIsLoadingStep(true);
+          setCurrentStepIdx(data.data.step_index);
+          if (data.data.teaching_steps) {
+            setTeachingSteps(data.data.teaching_steps);
+          }
+          pendingContentRef.current = '';
+          setStepContent('');
+        }
+
+        if (data.type === 'chunk') {
+          setIsLoadingStep(false);
+          pendingContentRef.current += data.content;
+          setStepContent(pendingContentRef.current);
+        }
+
+        if (data.type === 'step_done') {
+          setIsLoadingStep(false);
+          setStepContent(data.content || pendingContentRef.current);
+          if (data.data?.teaching_steps) {
+            setTeachingSteps(data.data.teaching_steps);
+          }
+          setCurrentStepIdx(data.data?.step_index ?? 0);
+        }
+
+        if (data.type === 'done') {
+          setIsAsking(false);
+          setAskResponse(pendingContentRef.current);
+        }
+
+        if (data.type === 'classroom_complete') {
+          setView('summary');
+        }
+
+        if (data.type === 'error') {
+          setIsLoadingStep(false);
+          setIsAsking(false);
+        }
+      };
+
+      ws.send(JSON.stringify({
+        type: 'init',
+        subject: selectedSubject,
+        topic: lesson.title,
+      }));
+    } catch {
+      setStepContent(`# ${lesson.title}\n\n${lesson.description}\n\n**学习目标：**\n${lesson.knowledgePoints.map(kp => `- 掌握${kp}`).join('\n')}\n\n无法连接AI课堂服务，请检查后端是否启动。`);
+    }
+  }, [selectedSubject, connectClassroomWs]);
+
+  const goToStep = useCallback((direction: 'next' | 'prev' | number) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    if (typeof direction === 'number') {
+      wsRef.current.send(JSON.stringify({ type: 'goto_step', step: teachingSteps[direction]?.key }));
+    } else if (direction === 'next') {
+      wsRef.current.send(JSON.stringify({ type: 'next_step' }));
+    } else {
+      wsRef.current.send(JSON.stringify({ type: 'prev_step' }));
+    }
+    setAskResponse('');
+    setAskInput('');
+  }, [teachingSteps]);
+
+  const handleAsk = useCallback(() => {
+    if (!askInput.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    setIsAsking(true);
+    setAskResponse('');
+    pendingContentRef.current = '';
+    wsRef.current.send(JSON.stringify({ type: 'ask', content: askInput.trim() }));
+    setAskInput('');
+  }, [askInput]);
+
+  const currentChapter = subjectChapters[selectedSubject];
 
   if (view === 'learning' && selectedLesson) {
-    const step = currentStep;
-    const totalSteps = 4 + selectedLesson.examples.length + selectedLesson.exercises.length;
+    const currentStep = teachingSteps[currentStepIdx];
+    const progress = ((currentStepIdx + 1) / teachingSteps.length) * 100;
 
     return (
       <div className="h-[calc(100vh-7rem)] flex flex-col max-w-4xl mx-auto">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 rounded-t-2xl">
           <button onClick={() => setView('list')} className="flex items-center gap-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors">
             <ArrowLeft className="w-4 h-4" />
@@ -133,10 +215,10 @@ export function Classroom() {
           </button>
           <div className="flex-1 mx-6">
             <div className="flex justify-between text-xs mb-1">
-              <span className="text-slate-500">课程进度</span>
-              <span className="text-violet-600 font-medium">{Math.round((step / totalSteps) * 100)}%</span>
+              <span className="text-slate-500">{currentStep?.label || '加载中...'}</span>
+              <span className="text-violet-600 font-medium">{Math.round(progress)}%</span>
             </div>
-            <Progress value={(step / totalSteps) * 100} className="h-2" />
+            <Progress value={progress} className="h-2" />
           </div>
           <span className="text-sm text-slate-500 flex items-center gap-1">
             <Clock className="w-4 h-4" />
@@ -144,228 +226,128 @@ export function Classroom() {
           </span>
         </div>
 
-        {/* Content */}
         <ScrollArea className="flex-1 p-6">
           <AnimatePresence mode="wait">
-            {/* Step 0: Learning Objectives */}
-            {step === 0 && (
-              <motion.div key="step0" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <Badge className="mb-4 bg-violet-100 text-violet-700">学习目标</Badge>
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-4">{selectedLesson.title}</h2>
-                <p className="text-slate-600 dark:text-slate-300 mb-6">{selectedLesson.description}</p>
-                <div className="space-y-3 mb-6">
-                  {selectedLesson.knowledgePoints.map((kp, i) => (
-                    <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-violet-50 dark:bg-violet-900/20">
-                      <Target className="w-5 h-5 text-violet-500" />
-                      <span className="text-slate-700 dark:text-slate-200">掌握{kp}</span>
-                    </div>
-                  ))}
+            <motion.div key={currentStepIdx} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <Badge className="mb-4 bg-violet-100 text-violet-700">{currentStep?.label || '加载中'}</Badge>
+              <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-4">{selectedLesson.title}</h2>
+
+              {isLoadingStep ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-violet-500 animate-spin" />
+                  <span className="ml-3 text-slate-500">AI老师正在准备课程内容...</span>
                 </div>
-                <p className="text-sm text-slate-500 dark:text-slate-400">本节课约{selectedLesson.duration}分钟，包含例题精讲和即时练习。</p>
-              </motion.div>
-            )}
-
-            {/* Step 1: Knowledge Explanation */}
-            {step === 1 && (
-              <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <Badge className="mb-4 bg-blue-100 text-blue-700">知识讲解</Badge>
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-4">{selectedLesson.title}</h2>
-                <div className="prose dark:prose-invert max-w-none mb-6">
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 mb-4">
-                    <h4 className="font-semibold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-blue-500" />
-                      定义
-                    </h4>
-                    <p className="text-slate-600 dark:text-slate-300 text-sm">
-                      {selectedLesson.title}是指：{selectedLesson.description}。这是解决一元二次方程的重要方法之一。
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-700/50 mb-4">
-                    <h4 className="font-semibold text-slate-800 dark:text-white mb-2 flex items-center gap-2">
-                      <Lightbulb className="w-4 h-4 text-amber-500" />
-                      核心思路
-                    </h4>
-                    <p className="text-slate-600 dark:text-slate-300 text-sm">
-                      通过{selectedLesson.knowledgePoints[0]}，将复杂的一元二次方程转化为可以直接求解的形式。
-                    </p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                    <h4 className="font-semibold text-amber-800 dark:text-amber-300 mb-2 flex items-center gap-2">
-                      <Star className="w-4 h-4" />
-                      注意事项
-                    </h4>
-                    <ul className="text-sm text-amber-700 dark:text-amber-200 space-y-1">
-                      <li>确保方程是一元二次方程的标准形式 ax²+bx+c=0</li>
-                      <li>注意计算过程中的符号变化</li>
-                      <li>最后要检验答案是否正确</li>
-                    </ul>
-                  </div>
+              ) : (
+                <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">
+                  {stepContent}
                 </div>
-              </motion.div>
-            )}
+              )}
 
-            {/* Step 2: Example */}
-            {step === 2 && selectedLesson.examples[0] && (
-              <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <Badge className="mb-4 bg-emerald-100 text-emerald-700">例题精讲</Badge>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4">{selectedLesson.examples[0].question}</h2>
-                
-                {!showExample ? (
-                  <Button onClick={() => setShowExample(true)} className="rounded-xl bg-emerald-600 hover:bg-emerald-700">
-                    <Play className="w-4 h-4 mr-2" />
-                    查看解析
-                  </Button>
-                ) : (
-                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                    <div className="space-y-3 mb-4">
-                      {selectedLesson.examples[0].steps.map((s, i) => (
-                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20">
-                          <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0">{i + 1}</span>
-                          <span className="text-slate-700 dark:text-slate-200 text-sm">{s}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="p-4 rounded-xl bg-slate-800 text-white">
-                      <p className="font-medium mb-1">最终答案</p>
-                      <p className="text-sm text-slate-300">{selectedLesson.examples[0].solution}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </motion.div>
-            )}
-
-            {/* Step 3: Exercise */}
-            {step === 3 && selectedLesson.exercises[0] && (
-              <motion.div key="step3" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <Badge className="mb-4 bg-orange-100 text-orange-700">即时练习</Badge>
-                <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4">{selectedLesson.exercises[0].question}</h2>
-                
-                {selectedLesson.exercises[0].options && (
-                  <div className="space-y-3 mb-4">
-                    {selectedLesson.exercises[0].options.map((opt, i) => (
-                      <button
-                        key={i}
-                        onClick={() => { setExerciseAnswer(opt); setShowExerciseResult(false); }}
-                        disabled={showExerciseResult}
-                        className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-                          exerciseAnswer === opt
-                            ? showExerciseResult
-                              ? opt === selectedLesson.exercises[0].answer
-                                ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
-                                : 'border-red-500 bg-red-50 dark:bg-red-900/20'
-                              : 'border-violet-500 bg-violet-50 dark:bg-violet-900/20'
-                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
-                        }`}
-                      >
-                        <span className="font-medium mr-2 text-slate-500">{String.fromCharCode(65 + i)}.</span>
-                        <span className="text-slate-700 dark:text-slate-200">{opt}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {exerciseAnswer && !showExerciseResult && (
-                  <Button onClick={() => setShowExerciseResult(true)} className="rounded-xl bg-violet-600 hover:bg-violet-700">
-                    提交答案
-                  </Button>
-                )}
-
-                {showExerciseResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`p-4 rounded-xl ${
-                      exerciseAnswer === selectedLesson.exercises[0].answer
-                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-                        : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      {exerciseAnswer === selectedLesson.exercises[0].answer ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <FileQuestion className="w-5 h-5 text-red-600" />
-                      )}
-                      <span className={`font-semibold ${exerciseAnswer === selectedLesson.exercises[0].answer ? 'text-green-700' : 'text-red-700'}`}>
-                        {exerciseAnswer === selectedLesson.exercises[0].answer ? '回答正确！' : '再想想看~'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-slate-600 dark:text-slate-300">{selectedLesson.exercises[0].explanation}</p>
-                  </motion.div>
-                )}
-              </motion.div>
-            )}
-
-            {/* Step 4: Summary */}
-            {step >= 4 && (
-              <motion.div key="step4" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <Badge className="mb-4 bg-amber-100 text-amber-700">课堂小结</Badge>
-                <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-4">本节课总结</h2>
-                <div className="space-y-4 mb-6">
-                  <div className="p-4 rounded-xl bg-violet-50 dark:bg-violet-900/20">
-                    <h4 className="font-semibold text-violet-800 dark:text-violet-300 mb-2">核心知识</h4>
-                    <p className="text-sm text-violet-700 dark:text-violet-200">掌握了{selectedLesson.title}的基本概念和应用方法</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-900/20">
-                    <h4 className="font-semibold text-emerald-800 dark:text-emerald-300 mb-2">学习成果</h4>
-                    <div className="flex gap-2 flex-wrap">
-                      {selectedLesson.knowledgePoints.map((kp, i) => (
-                        <Badge key={i} variant="outline" className="border-emerald-300 text-emerald-700">
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                          {kp}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20">
-                    <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">课后推荐</h4>
-                    <p className="text-sm text-blue-700 dark:text-blue-200 mb-3">建议完成以下练习巩固所学知识：</p>
-                    <div className="space-y-2">
-                      <button onClick={() => setCurrentPage('exam')} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700">
-                        <ChevronRight className="w-4 h-4" />
-                        做3道{selectedLesson.title}相关练习题
-                      </button>
-                      <button onClick={() => setCurrentPage('chat')} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700">
-                        <ChevronRight className="w-4 h-4" />
-                        向AI老师提问，深入理解疑难
-                      </button>
-                    </div>
-                  </div>
+              {askResponse && (
+                <div className="mt-6 p-4 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+                  <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2 flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4" />
+                    AI老师回答
+                  </h4>
+                  <div className="prose dark:prose-invert max-w-none text-sm whitespace-pre-wrap">{askResponse}</div>
                 </div>
-              </motion.div>
-            )}
+              )}
+            </motion.div>
           </AnimatePresence>
         </ScrollArea>
 
-        {/* Footer Controls */}
-        <div className="flex items-center justify-between p-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 rounded-b-2xl">
-          <Button
-            variant="outline"
-            onClick={() => setCurrentStep(Math.max(0, currentStep - 1))}
-            disabled={currentStep === 0}
-            className="rounded-xl"
-          >
-            上一步
-          </Button>
-          <div className="flex gap-1">
-            {Array.from({ length: totalSteps }).map((_, i) => (
-              <div
-                key={i}
-                className={`w-2 h-2 rounded-full ${i === currentStep ? 'bg-violet-500' : i < currentStep ? 'bg-emerald-400' : 'bg-slate-200 dark:bg-slate-700'}`}
-              />
-            ))}
+        <div className="p-4 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 rounded-b-2xl space-y-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={askInput}
+              onChange={e => setAskInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAsk()}
+              placeholder="有问题？向AI老师提问..."
+              className="flex-1 bg-slate-100 dark:bg-slate-700/50 rounded-xl px-4 py-2 text-sm text-slate-800 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500"
+            />
+            <Button
+              onClick={handleAsk}
+              disabled={isAsking || !askInput.trim()}
+              size="sm"
+              className="rounded-xl bg-violet-600 hover:bg-violet-700"
+            >
+              {isAsking ? <Loader2 className="w-4 h-4 animate-spin" /> : '提问'}
+            </Button>
           </div>
-          <Button
-            onClick={() => {
-              if (currentStep >= totalSteps - 1) {
-                setView('list');
-              } else {
-                setCurrentStep(currentStep + 1);
-              }
-            }}
-            className="rounded-xl bg-violet-600 hover:bg-violet-700"
-          >
-            {currentStep >= totalSteps - 1 ? '完成' : '下一步'}
+          <div className="flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={() => goToStep('prev')}
+              disabled={currentStepIdx === 0}
+              className="rounded-xl"
+            >
+              上一步
+            </Button>
+            <div className="flex gap-1">
+              {teachingSteps.map((s, i) => (
+                <button
+                  key={s.key}
+                  onClick={() => goToStep(i)}
+                  className={`w-2 h-2 rounded-full transition-colors ${
+                    i === currentStepIdx ? 'bg-violet-500' : i < currentStepIdx ? 'bg-emerald-400' : 'bg-slate-200 dark:bg-slate-700'
+                  }`}
+                />
+              ))}
+            </div>
+            <Button
+              onClick={() => {
+                if (currentStepIdx >= teachingSteps.length - 1) {
+                  if (wsRef.current) wsRef.current.close();
+                  setView('summary');
+                } else {
+                  goToStep('next');
+                }
+              }}
+              className="rounded-xl bg-violet-600 hover:bg-violet-700"
+            >
+              {currentStepIdx >= teachingSteps.length - 1 ? '完成' : '下一步'}
+              <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (view === 'summary') {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="rounded-2xl bg-gradient-to-br from-violet-600 to-blue-600 p-8 text-white text-center"
+        >
+          <GraduationCap className="w-12 h-12 mx-auto mb-4 text-amber-300" />
+          <h2 className="text-2xl font-bold mb-2">课堂完成！</h2>
+          <p className="text-violet-100 mb-4">{selectedLesson?.title}</p>
+          <div className="grid grid-cols-3 gap-4 max-w-md mx-auto">
+            <div className="bg-white/15 rounded-xl p-3">
+              <p className="text-2xl font-bold">{teachingSteps.length}</p>
+              <p className="text-xs text-violet-200">学习步骤</p>
+            </div>
+            <div className="bg-white/15 rounded-xl p-3">
+              <p className="text-2xl font-bold">{selectedLesson?.duration || 0}</p>
+              <p className="text-xs text-violet-200">预计时长(分)</p>
+            </div>
+            <div className="bg-white/15 rounded-xl p-3">
+              <p className="text-2xl font-bold">{selectedLesson?.knowledgePoints.length || 0}</p>
+              <p className="text-xs text-violet-200">知识点</p>
+            </div>
+          </div>
+        </motion.div>
+
+        <div className="flex gap-3 justify-center pb-6">
+          <Button onClick={() => setView('list')} variant="outline" className="rounded-xl">
+            返回课程列表
+          </Button>
+          <Button onClick={() => setCurrentPage('chat')} className="rounded-xl bg-violet-600 hover:bg-violet-700">
+            向AI老师提问
             <ChevronRight className="w-4 h-4 ml-1" />
           </Button>
         </div>
@@ -373,7 +355,6 @@ export function Classroom() {
     );
   }
 
-  // List View
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="text-center py-8">
@@ -384,20 +365,19 @@ export function Classroom() {
         <p className="text-slate-500 dark:text-slate-400">结构化教学 · 循序渐进 · 即时练习 · 智能适配</p>
       </div>
 
-      {/* Subject Selector */}
       <div className="flex gap-3 justify-center flex-wrap">
-        {['数学', '英语', '语文', '物理', '化学'].map((s, i) => (
+        {Object.keys(subjectChapters).map((s) => (
           <Button
             key={s}
-            variant={i === 0 ? 'default' : 'outline'}
-            className={`rounded-xl ${i === 0 ? 'bg-violet-600' : ''}`}
+            variant={selectedSubject === s ? 'default' : 'outline'}
+            onClick={() => setSelectedSubject(s)}
+            className={`rounded-xl ${selectedSubject === s ? 'bg-violet-600' : ''}`}
           >
             {s}
           </Button>
         ))}
       </div>
 
-      {/* Chapter: Quadratic Equations */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -405,17 +385,13 @@ export function Classroom() {
       >
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="font-bold text-lg text-slate-800 dark:text-white">第九章：一元二次方程</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">6节课 · 约2.5小时 · 进度 25%</p>
-          </div>
-          <div className="text-right">
-            <Progress value={25} className="w-32 h-2" />
-            <span className="text-xs text-slate-500 mt-1">2/6 已完成</span>
+            <h3 className="font-bold text-lg text-slate-800 dark:text-white">{currentChapter.title}</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{currentChapter.lessons.length}节课 · AI智能教学</p>
           </div>
         </div>
 
         <div className="space-y-3">
-          {mockLessons.map((lesson, i) => (
+          {currentChapter.lessons.map((lesson, i) => (
             <motion.div
               key={lesson.id}
               initial={{ opacity: 0, x: -10 }}
@@ -446,12 +422,7 @@ export function Classroom() {
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{lesson.description} · {lesson.duration}分钟</p>
               </div>
-              <div className="flex items-center gap-2">
-                {lesson.progress > 0 && lesson.progress < 100 && (
-                  <Progress value={lesson.progress} className="w-20 h-1.5" />
-                )}
-                {!lesson.locked && <ChevronRight className="w-4 h-4 text-slate-400" />}
-              </div>
+              {!lesson.locked && <ChevronRight className="w-4 h-4 text-slate-400" />}
             </motion.div>
           ))}
         </div>

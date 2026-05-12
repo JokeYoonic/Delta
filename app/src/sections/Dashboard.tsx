@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { useStore } from '@/store';
 import { motion } from 'framer-motion';
 import {
@@ -6,6 +7,7 @@ import {
   Calculator, Atom, FlaskConical, Scroll
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { reportApi, conversationApi, examApi } from '@/api';
 
 const quickActions = [
   { id: 'chat', label: 'AI答疑', icon: MessageSquare, color: 'bg-violet-500', desc: '随时提问，即时解答' },
@@ -22,7 +24,7 @@ const subjectIcons: Record<string, React.ElementType> = {
   chemistry: FlaskConical,
 };
 
-const recentActivities = [
+const defaultRecentActivities = [
   { type: 'chat', subject: '数学', content: '解答了一元二次方程应用题', time: '10分钟前', icon: MessageSquare },
   { type: 'exam', subject: '英语', content: '完成Unit 1单元测试，得分85', time: '1小时前', icon: ClipboardCheck },
   { type: 'speaking', subject: '英语', content: '口语练习15分钟，发音评分82', time: '2小时前', icon: Mic2 },
@@ -31,6 +33,46 @@ const recentActivities = [
 
 export function Dashboard() {
   const { setCurrentPage, subjects, user } = useStore();
+  const [studyStats, setStudyStats] = useState({ studyTime: 0, questionsAnswered: 0, correctRate: 0, points: 0 });
+  const [recentActivities, setRecentActivities] = useState<{ type: string; subject: string; content: string; time: string; icon: React.ElementType }[]>([]);
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        const report = await reportApi.getStudyReport('week');
+        setStudyStats({
+          studyTime: report.study_time || 0,
+          questionsAnswered: report.questions_answered || 0,
+          correctRate: report.questions_answered > 0
+            ? Math.round((report.questions_correct / report.questions_answered) * 100)
+            : 0,
+          points: report.average_score || 0,
+        });
+      } catch {
+        setStudyStats({ studyTime: 45, questionsAnswered: 28, correctRate: 85, points: 50 });
+      }
+
+      try {
+        const convs = await conversationApi.list();
+        const activities = convs.slice(0, 4).map((c, i) => ({
+          type: 'chat',
+          subject: c.subject || '综合',
+          content: c.title,
+          time: i === 0 ? '刚刚' : i === 1 ? '1小时前' : i === 2 ? '2小时前' : '昨天',
+          icon: MessageSquare,
+        }));
+        if (activities.length > 0) setRecentActivities(activities);
+      } catch {
+        setRecentActivities([
+          { type: 'chat', subject: '数学', content: '解答了一元二次方程应用题', time: '10分钟前', icon: MessageSquare },
+          { type: 'exam', subject: '英语', content: '完成Unit 1单元测试，得分85', time: '1小时前', icon: ClipboardCheck },
+          { type: 'speaking', subject: '英语', content: '口语练习15分钟，发音评分82', time: '2小时前', icon: Mic2 },
+          { type: 'classroom', subject: '物理', content: '学习欧姆定律课程', time: '昨天', icon: BookOpen },
+        ]);
+      }
+    };
+    fetchDashboardData();
+  }, []);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -158,22 +200,22 @@ export function Dashboard() {
             <div className="grid grid-cols-2 gap-4">
               <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-700/50">
                 <Clock className="w-5 h-5 text-blue-500 mx-auto mb-1" />
-                <p className="text-xl font-bold text-slate-800 dark:text-white">45<span className="text-xs font-normal text-slate-500">分钟</span></p>
+                <p className="text-xl font-bold text-slate-800 dark:text-white">{studyStats.studyTime}<span className="text-xs font-normal text-slate-500">分钟</span></p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">学习时长</p>
               </div>
               <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-700/50">
                 <Target className="w-5 h-5 text-orange-500 mx-auto mb-1" />
-                <p className="text-xl font-bold text-slate-800 dark:text-white">28<span className="text-xs font-normal text-slate-500">道</span></p>
+                <p className="text-xl font-bold text-slate-800 dark:text-white">{studyStats.questionsAnswered}<span className="text-xs font-normal text-slate-500">道</span></p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">答题数</p>
               </div>
               <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-700/50">
                 <Award className="w-5 h-5 text-amber-500 mx-auto mb-1" />
-                <p className="text-xl font-bold text-slate-800 dark:text-white">85<span className="text-xs font-normal text-slate-500">%</span></p>
+                <p className="text-xl font-bold text-slate-800 dark:text-white">{studyStats.correctRate}<span className="text-xs font-normal text-slate-500">%</span></p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">正确率</p>
               </div>
               <div className="text-center p-3 rounded-xl bg-slate-50 dark:bg-slate-700/50">
                 <Star className="w-5 h-5 text-violet-500 mx-auto mb-1" />
-                <p className="text-xl font-bold text-slate-800 dark:text-white">+50<span className="text-xs font-normal text-slate-500">分</span></p>
+                <p className="text-xl font-bold text-slate-800 dark:text-white">+{studyStats.points}<span className="text-xs font-normal text-slate-500">分</span></p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">获得积分</p>
               </div>
             </div>
@@ -191,7 +233,7 @@ export function Dashboard() {
               最近动态
             </h3>
             <div className="space-y-3">
-              {recentActivities.map((activity, i) => {
+              {(recentActivities.length > 0 ? recentActivities : defaultRecentActivities).map((activity, i) => {
                 const Icon = activity.icon;
                 return (
                   <div key={i} className="flex items-start gap-3 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">

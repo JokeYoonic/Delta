@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useStore } from '@/store';
 import { motion } from 'framer-motion';
 import {
   ClipboardCheck, Play, Clock, CheckCircle, XCircle, AlertCircle,
   ChevronRight, RotateCcw, BarChart3, BookOpen, Calculator,
-  Target, Award, TrendingUp
+  Target, Award, TrendingUp, Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { examApi } from '@/api';
 import type { Question, Exam, ExamType, ExamResult } from '@/types';
 
 const mockQuestions: Question[] = [
@@ -65,36 +66,83 @@ export function ExamCenter() {
   const [result, setResult] = useState<ExamResult | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
 
-  const startExam = (mode: ExamType) => {
-    const exam: Exam = {
-      id: `exam-${Date.now()}`,
-      title: '一元二次方程单元测试',
-      type: mode,
-      subject: '数学',
-      chapter: '一元二次方程',
-      questions: mockQuestions.map(q => ({ ...q, userAnswer: '' })),
-      duration: 30,
-      totalScore: mockQuestions.reduce((a, q) => a + q.score, 0),
-      timeRemaining: mode === 'practice' ? 9999 : 30 * 60,
-      status: 'in-progress',
-    };
-    setSelectedMode(mode);
-    setCurrentExam(exam);
-    setAnswers({});
-    setCurrentQuestion(0);
-    setView('exam');
-    if (mode !== 'practice') {
-      setTimeRemaining(exam.timeRemaining);
-      const timer = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev <= 1) { clearInterval(timer); return 0; }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-  };
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
+  const [selectedSubject, setSelectedSubject] = useState('数学');
+  const [selectedChapter, setSelectedChapter] = useState('一元二次方程');
 
-  const submitExam = () => {
+  const startExam = useCallback(async (mode: ExamType) => {
+    setIsLoadingQuestions(true);
+    try {
+      const genResult = await examApi.generateQuestions({
+        subject: selectedSubject,
+        chapter: selectedChapter,
+        difficulty: mode === 'practice' ? 'easy' : mode === 'quiz' ? 'medium' : 'hard',
+        count: mode === 'simulation' ? 20 : 10,
+      });
+
+      const questions: Question[] = (genResult.questions || mockQuestions).map((q: Record<string, unknown>, i: number) => ({
+        id: (q.id as string) || `q-${i}`,
+        type: (q.type as Question['type']) || 'single',
+        content: (q.content as string) || '',
+        options: (q.options as string[]) || [],
+        correctAnswer: (q.answer as string) || '',
+        explanation: (q.explanation as string) || '',
+        knowledgePoint: ((q.knowledge_points as string[])?.[0]) || '',
+        difficulty: (q.difficulty as Question['difficulty']) || 'medium',
+        score: (q.score as number) || 5,
+        userAnswer: '',
+      }));
+
+      const exam: Exam = {
+        id: `exam-${Date.now()}`,
+        title: `${selectedChapter}单元测试`,
+        type: mode,
+        subject: selectedSubject,
+        chapter: selectedChapter,
+        questions,
+        duration: mode === 'simulation' ? 45 : 30,
+        totalScore: questions.reduce((a, q) => a + q.score, 0),
+        timeRemaining: mode === 'practice' ? 9999 : (mode === 'simulation' ? 45 : 30) * 60,
+        status: 'in-progress',
+      };
+      setSelectedMode(mode);
+      setCurrentExam(exam);
+      setAnswers({});
+      setCurrentQuestion(0);
+      setView('exam');
+      if (mode !== 'practice') {
+        setTimeRemaining(exam.timeRemaining);
+        const timer = setInterval(() => {
+          setTimeRemaining(prev => {
+            if (prev <= 1) { clearInterval(timer); return 0; }
+            return prev - 1;
+          });
+        }, 1000);
+      }
+    } catch {
+      const exam: Exam = {
+        id: `exam-${Date.now()}`,
+        title: `${selectedChapter}单元测试`,
+        type: mode,
+        subject: selectedSubject,
+        chapter: selectedChapter,
+        questions: mockQuestions.map(q => ({ ...q, userAnswer: '' })),
+        duration: 30,
+        totalScore: mockQuestions.reduce((a, q) => a + q.score, 0),
+        timeRemaining: mode === 'practice' ? 9999 : 30 * 60,
+        status: 'in-progress',
+      };
+      setSelectedMode(mode);
+      setCurrentExam(exam);
+      setAnswers({});
+      setCurrentQuestion(0);
+      setView('exam');
+    } finally {
+      setIsLoadingQuestions(false);
+    }
+  }, [selectedSubject, selectedChapter]);
+
+  const submitExam = async () => {
     if (!currentExam) return;
     let score = 0;
     let correct = 0;
@@ -119,6 +167,30 @@ export function ExamCenter() {
       mastery: Math.round((stats.correct / stats.total) * 100),
     }));
 
+    let suggestions: string[] = [];
+    try {
+      const analysis = await examApi.analyzeMistakes({
+        wrong_questions: wrongQs.map(q => ({
+          content: q.content,
+          user_answer: q.userAnswer,
+          correct_answer: q.correctAnswer,
+          knowledge_point: q.knowledgePoint,
+        })),
+        subject: currentExam.subject,
+      });
+      suggestions = (analysis as Record<string, unknown>).suggestions as string[] || [
+        '建议复习薄弱知识点',
+        '多练习相关题型',
+        '注意审题和计算准确性',
+      ];
+    } catch {
+      suggestions = [
+        '建议复习韦达定理和根的判别式',
+        '多练习因式分解法解方程',
+        '注意计算过程中的符号变化',
+      ];
+    }
+
     const res: ExamResult = {
       examId: currentExam.id,
       score,
@@ -128,12 +200,27 @@ export function ExamCenter() {
       timeUsed: (currentExam.duration * 60) - timeRemaining,
       knowledgeMastery: mastery,
       wrongQuestions: wrongQs,
-      suggestions: [
-        '建议复习韦达定理和根的判别式',
-        '多练习因式分解法解方程',
-        '注意计算过程中的符号变化',
-      ],
+      suggestions,
     };
+
+    try {
+      await examApi.submitResult({
+        exam_title: currentExam.title,
+        exam_type: currentExam.type,
+        subject: currentExam.subject,
+        score: res.score,
+        total_score: res.totalScore,
+        correct_count: res.correctCount,
+        wrong_count: res.wrongCount,
+        time_used: res.timeUsed,
+        knowledge_mastery: res.knowledgeMastery,
+        wrong_questions: res.wrongQuestions,
+        suggestions: res.suggestions,
+      });
+    } catch {
+      // silently fail - result is still shown locally
+    }
+
     setResult(res);
     setView('result');
   };
@@ -311,7 +398,7 @@ export function ExamCenter() {
               下一题
             </Button>
           ) : (
-            <Button onClick={submitExam} className="rounded-xl bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={submitExam} data-testid="submit-exam-btn" className="rounded-xl bg-emerald-600 hover:bg-emerald-700">
               提交试卷
             </Button>
           )}
@@ -466,6 +553,7 @@ export function ExamCenter() {
               transition={{ delay: i * 0.1 }}
               className="rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-6 hover:shadow-lg transition-all cursor-pointer"
               onClick={() => startExam(mode.id)}
+              data-testid={`start-${mode.id}-exam`}
             >
               <div className={`w-12 h-12 rounded-xl ${mode.color} flex items-center justify-center mb-4`}>
                 <Icon className="w-6 h-6 text-white" />

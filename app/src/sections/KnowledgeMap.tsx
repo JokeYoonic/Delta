@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Network, Search, ChevronRight, Target,
-  BookOpen, Zap, TrendingUp, Award, Calculator, Atom, FlaskConical, Scroll
+  BookOpen, Zap, TrendingUp, Award, Calculator, Atom, FlaskConical, Scroll,
+  RefreshCw, Bell, Clock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { knowledgeApi } from '@/api';
 
 const subjectIcons: Record<string, React.ElementType> = {
   math: Calculator,
@@ -24,6 +26,33 @@ export function KnowledgeMap() {
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedKp, setExpandedKp] = useState<string | null>(null);
+  const [dueReviews, setDueReviews] = useState<{ id: string; name: string; subject: string; chapter: string; mastery: number; difficulty: string }[]>([]);
+  const [isLoadingDue, setIsLoadingDue] = useState(false);
+
+  const fetchDueReviews = useCallback(async () => {
+    setIsLoadingDue(true);
+    try {
+      const data = await knowledgeApi.getDueReviews();
+      setDueReviews(data.knowledge_points as typeof dueReviews);
+    } catch {
+      setDueReviews([]);
+    } finally {
+      setIsLoadingDue(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDueReviews();
+  }, [fetchDueReviews]);
+
+  const handleReview = useCallback(async (kpId: string, quality: number) => {
+    try {
+      await knowledgeApi.submitReview(kpId, quality);
+      setDueReviews(prev => prev.filter(kp => kp.id !== kpId));
+    } catch {
+      // silently fail
+    }
+  }, []);
 
   const filteredKps = selectedSubject.chapters.flatMap(ch =>
     ch.knowledgePoints.filter(kp =>
@@ -126,6 +155,48 @@ export function KnowledgeMap() {
                     <p className="text-sm text-slate-700 dark:text-slate-200">{kp.name}</p>
                     <p className="text-xs text-slate-400">{kp.chapterTitle}</p>
                   </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Due Reviews */}
+          <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                <Bell className="w-4 h-4" />
+                待复习
+              </h3>
+              <Button variant="ghost" size="sm" onClick={fetchDueReviews} className="h-7 w-7 p-0">
+                <RefreshCw className={`w-3 h-3 ${isLoadingDue ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+            {dueReviews.length === 0 ? (
+              <p className="text-xs text-amber-600 dark:text-amber-400 text-center py-4">
+                {isLoadingDue ? '加载中...' : '暂无待复习知识点 🎉'}
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {dueReviews.slice(0, 5).map(kp => (
+                  <div key={kp.id} className="flex items-center justify-between p-2 rounded-lg bg-white/60 dark:bg-slate-800/60">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{kp.name}</p>
+                      <p className="text-xs text-slate-400 flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        掌握度 {kp.mastery}%
+                      </p>
+                    </div>
+                    <div className="flex gap-1 ml-2">
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs rounded-md border-green-300 text-green-600 hover:bg-green-50"
+                        onClick={() => handleReview(kp.id, 4)}>
+                        会了
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-xs rounded-md border-red-300 text-red-600 hover:bg-red-50"
+                        onClick={() => handleReview(kp.id, 2)}>
+                        不会
+                      </Button>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

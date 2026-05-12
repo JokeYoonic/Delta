@@ -1,0 +1,162 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: delta_ai
+      POSTGRES_USER: delta
+      POSTGRES_PASSWORD: delta
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delta -d delta_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bifrost:
+    image: maximhq/bifrost:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - bifrost_data:/app/data
+    environment:
+      PROVIDERS_DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      PROVIDERS_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GUARDRAILS_ENABLED: "true"
+      CACHE_ENABLED: "true"
+      CACHE_TTL: "86400"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  logto:
+    image: svhd/logto:latest
+    entrypoint: ["sh", "-c", "npx logto db seed && npm run start"]
+    ports:
+      - "3301:3301"
+      - "3302:3302"
+    environment:
+      PORT: 3301
+      ADMIN_PORT: 3302
+      DB_URL: postgresql://delta:delta@postgres:5432/logto
+      ENDPOINT: http://localhost:3301
+      ADMIN_ENDPOINT: http://localhost:3302
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ragflow:
+    image: infiniflow/ragflow:latest
+    ports:
+      - "9380:9380"
+      - "80:80"
+    volumes:
+      - ragflow_data:/ragflow
+    environment:
+      SVR_HTTP_PORT: 9380
+      MYSQL_PASSWORD: ragflow123
+    depends_on:
+      - elasticsearch
+
+  elasticsearch:
+    image: elasticsearch:8.11.3
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\\|yellow\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  funasr:
+    image: registry.cn-hangzhou.aliyuncs.com/funasr/funasr:latest
+    ports:
+      - "10095:10095"
+    command: >
+      bash -c "funasr_server --model-dir paraformer-zh --vad-dir fsmn-vad --punc-dir ct-punc"
+    volumes:
+      - funasr_models:/root/models
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi:latest
+    ports:
+      - "8880:8880"
+    environment:
+      PYTHONUNBUFFERED: 1
+
+  faster-whisper:
+    image: fedirz/faster-whisper-server:latest-cpu
+    ports:
+      - "10300:8000"
+    volumes:
+      - whisper_models:/root/.cache/huggingface
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://delta:delta@postgres:5432/delta_ai
+      DATABASE_URL_SYNC: postgresql://delta:delta@postgres:5432/delta_ai
+      REDIS_URL: redis://redis:6379/0
+      BIFROST_ENABLED: "true"
+      BIFROST_URL: http://bifrost:8080/v1
+      LOGTO_ENABLED: "true"
+      LOGTO_ENDPOINT: http://logto:3301
+      LLM_API_KEY: ${DEEPSEEK_API_KEY:-}
+      LLM_HOST: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek/deepseek-chat
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "5173:3000"
+    volumes:
+      - ./app/src:/app/src
+    environment:
+      VITE_API_URL: http://localhost:8000/api/v1
+      VITE_LOGTO_ENDPOINT: http://localhost:3301
+      VITE_LOGTO_APP_ID: ${LOGTO_APP_ID:-}
+    command: npm run dev -- --host
+
+volumes:
+  postgres_data:
+  redis_data:
+  bifrost_data:
+  ragflow_data:
+  es_data:
+  funasr_models:
+  whisper_models:

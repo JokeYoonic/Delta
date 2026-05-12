@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
 import { motion } from 'framer-motion';
 import {
   BarChart3, TrendingUp, Clock, Target, Award, BookOpen,
   Flame, Zap, Star, Calendar, Calculator,
-  Atom
+  Atom, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { reportApi } from '@/api';
 
 const trendData = [
   { date: '5/6', score: 72, time: 30 },
@@ -42,8 +43,43 @@ type Period = 'day' | 'week' | 'month';
 export function StudyReport() {
   const [period, setPeriod] = useState<Period>('week');
   const { setCurrentPage } = useStore();
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiData, setApiData] = useState<{
+    study_time: number;
+    questions_answered: number;
+    questions_correct: number;
+    conversations_count: number;
+    exam_count: number;
+    average_score: number;
+    subject_mastery: { subject: string; average_mastery: number }[];
+    knowledge_gaps: string[];
+    trend: { date: string; study_time: number; correct_rate: number }[];
+  } | null>(null);
 
-  const stats = {
+  const fetchReport = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await reportApi.getStudyReport(period);
+      setApiData(data);
+    } catch {
+      setApiData(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [period]);
+
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport]);
+
+  const stats = apiData ? {
+    time: Math.round(apiData.study_time / 60),
+    questions: apiData.questions_answered,
+    correct: apiData.questions_answered > 0 ? Math.round((apiData.questions_correct / apiData.questions_answered) * 100) : 0,
+    conversations: apiData.conversations_count,
+    exams: apiData.exam_count,
+    avgScore: Math.round(apiData.average_score),
+  } : {
     day: { time: 45, questions: 28, correct: 85, conversations: 3, exams: 1, avgScore: 85 },
     week: { time: 395, questions: 186, correct: 82, conversations: 15, exams: 4, avgScore: 82 },
     month: { time: 1580, questions: 720, correct: 79, conversations: 52, exams: 12, avgScore: 80 },

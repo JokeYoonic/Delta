@@ -18,6 +18,13 @@ export interface ChatMessage {
   timestamp: number;
   type?: 'text' | 'image' | 'audio' | 'formula';
   attachment?: { type: string; url: string };
+  ragSources?: RAGSource[];
+}
+
+export interface RAGSource {
+  document: string;
+  similarity: number;
+  content_preview: string;
 }
 
 export interface Conversation {

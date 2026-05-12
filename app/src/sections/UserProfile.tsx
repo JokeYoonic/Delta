@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/store';
 import { motion } from 'framer-motion';
 import {
   UserCircle, Award, BookOpen, Target, TrendingUp,
   Flame, Star, Settings, Bell, Moon, Sun,
-  Edit3, Save, Calculator, Atom, Scroll
+  Edit3, Save, Calculator, Atom, Scroll, Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
+import { tutorApi, authApi } from '@/api';
 
 const achievements = [
   { id: '1', title: '初出茅庐', desc: '完成首次AI答疑', icon: Star, unlocked: true, color: 'text-amber-500' },
@@ -35,13 +36,61 @@ export function UserProfile() {
   const [grade, setGrade] = useState(user?.grade || '');
   const [school, setSchool] = useState(user?.school || '');
   const [notifications, setNotifications] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [tutorConfig, setTutorConfig] = useState<{
+    depth: number;
+    learningStyle: string;
+    communicationStyle: string;
+    toneStyle: string;
+    reasoningFramework: string;
+    useEmojis: boolean;
+  } | null>(null);
 
-  const handleSave = () => {
+  const fetchTutorConfig = useCallback(async () => {
+    try {
+      const config = await tutorApi.getConfig();
+      setTutorConfig({
+        depth: config.depth,
+        learningStyle: config.learning_style,
+        communicationStyle: config.communication_style,
+        toneStyle: config.tone_style,
+        reasoningFramework: config.reasoning_framework,
+        useEmojis: config.use_emojis,
+      });
+    } catch {
+      // use defaults from store
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTutorConfig();
+  }, [fetchTutorConfig]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await authApi.updateMe({ name, grade, school });
+    } catch {
+      // fallback to local update
+    }
     if (user) {
       setUser({ ...user, name, grade, school });
     }
     setEditing(false);
+    setIsSaving(false);
   };
+
+  const handleTutorConfigChange = useCallback(async (key: string, value: unknown) => {
+    const newConfig = { ...tutorConfig, [key]: value };
+    setTutorConfig(newConfig as typeof tutorConfig);
+    try {
+      await tutorApi.updateConfig({
+        [key]: value,
+      });
+    } catch {
+      // silently fail
+    }
+  }, [tutorConfig]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
