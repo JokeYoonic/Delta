@@ -8,6 +8,7 @@ from app.core.security import get_current_user
 from app.models import User, Conversation, ChatMessage
 from app.schemas import (
     ConversationCreate, ConversationResponse,
+    ConversationDetailResponse,
     ChatMessageCreate, ChatMessageResponse,
 )
 
@@ -46,7 +47,7 @@ async def create_conversation(
     return ConversationResponse.model_validate(conv)
 
 
-@router.get("/{conv_id}", response_model=ConversationResponse)
+@router.get("/{conv_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conv_id: str,
     current_user: User = Depends(get_current_user),
@@ -63,7 +64,7 @@ async def get_conversation(
         select(ChatMessage).where(ChatMessage.conversation_id == conv_id).order_by(ChatMessage.created_at)
     )
     conv.messages = list(msg_result.scalars().all())
-    return ConversationResponse.model_validate(conv)
+    return ConversationDetailResponse.model_validate(conv)
 
 
 @router.post("/{conv_id}/messages", response_model=ChatMessageResponse)

@@ -2,32 +2,19 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 class ApiClient {
   private baseUrl: string;
-  private token: string | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-    this.token = localStorage.getItem('delta_token');
   }
 
-  setToken(token: string) {
-    this.token = token;
-    localStorage.setItem('delta_token', token);
-  }
-
-  clearToken() {
-    this.token = null;
-    localStorage.removeItem('delta_token');
-  }
+  setToken(_token: string) {}
+  clearToken() {}
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>),
     };
-
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
 
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...options,
@@ -73,14 +60,8 @@ class ApiClient {
       }
     }
 
-    const headers: Record<string, string> = {};
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
-    }
-
     const response = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers,
       body: formData,
     });
 
@@ -94,7 +75,7 @@ class ApiClient {
 
   createWebSocket(path: string): WebSocket {
     const wsBase = this.baseUrl.replace(/^http/, 'ws');
-    const url = `${wsBase}${path}?token=${this.token}`;
+    const url = `${wsBase}${path}?token=dev`;
     return new WebSocket(url);
   }
 }
@@ -262,13 +243,9 @@ export const voiceApi = {
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.wav');
     if (language) formData.append('language', language);
-    const headers: Record<string, string> = {};
-    const token = localStorage.getItem('delta_token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const response = await fetch(`${API_BASE}/voice/stt`, {
       method: 'POST',
-      headers,
       body: formData,
     });
     return response.json();
@@ -277,13 +254,9 @@ export const voiceApi = {
     const formData = new FormData();
     formData.append('text', text);
     if (voice) formData.append('voice', voice);
-    const headers: Record<string, string> = {};
-    const token = localStorage.getItem('delta_token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const response = await fetch(`${API_BASE}/voice/tts`, {
       method: 'POST',
-      headers,
       body: formData,
     });
     return response.blob();
@@ -292,13 +265,9 @@ export const voiceApi = {
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.wav');
     formData.append('reference_text', referenceText);
-    const headers: Record<string, string> = {};
-    const token = localStorage.getItem('delta_token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const response = await fetch(`${API_BASE}/voice/evaluate-pronunciation`, {
       method: 'POST',
-      headers,
       body: formData,
     });
     return response.json();
@@ -312,16 +281,14 @@ export const speakingApi = {
   getSession: (id: string) => api.get<Record<string, unknown>>(`/speaking/sessions/${id}`),
   createWebSocket: () => {
     const wsBase = API_BASE.replace(/^http/, 'ws');
-    const token = localStorage.getItem('delta_token');
-    return new WebSocket(`${wsBase}/speaking/ws/${token}`);
+    return new WebSocket(`${wsBase}/speaking/ws/dev`);
   },
 };
 
 export const classroomApi = {
   createWebSocket: () => {
     const wsBase = API_BASE.replace(/^http/, 'ws');
-    const token = localStorage.getItem('delta_token');
-    return new WebSocket(`${wsBase}/classroom/ws/${token}`);
+    return new WebSocket(`${wsBase}/classroom/ws/dev`);
   },
 };
 

@@ -10,6 +10,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { voiceApi, speakingApi } from '@/api';
 import type { SpeakingRole, SpeakingScene, SpeakingMessage } from '@/types';
 
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
 type SpeakingView = 'setup' | 'session' | 'result';
 
 const roles: { id: SpeakingRole; label: string; desc: string; icon: string }[] = [
@@ -245,24 +252,50 @@ export function SpeakingLab() {
     setInputText('');
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'chat',
-        content: text.trim(),
-      }));
+      wsRef.current.send(JSON.stringify({ type: 'chat', content: text.trim() }));
     } else {
-      const responses = mockDialogues[selectedTopic];
-      const aiText = responses
-        ? responses[(messages.length + 1) % responses.length]
-        : 'That\'s great! Let\'s continue practicing. Can you tell me more?';
-      const aiMsg: SpeakingMessage = {
-        id: `msg-${Date.now() + 1}`,
-        role: 'ai',
-        text: aiText,
-        timestamp: Date.now(),
+      // 降级方案：走 AI 答疑的 WebSocket，用口语角色 prompt
+      setIsAiResponding(true);
+      const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/^http/, 'ws');
+      const chatWs = new WebSocket(`${wsBase}/chat/ws/dev`);
+      const aiMsgId = `msg-${Date.now() + 1}`;
+      let fullText = '';
+
+      chatWs.onopen = () => {
+        const rolePrompt = selectedRole === 'foreign'
+          ? `You are an English native speaker. Have a spoken English conversation about: ${selectedTopic}. Keep responses short (2-3 sentences). Only reply in English.`
+          : `你是口语练习伙伴，主题是"${selectedTopic}"。用中文简短回复（2-3句话），像真实对话一样自然。`;
+        chatWs.send(JSON.stringify({ type: 'init', conversation_id: `speaking-${Date.now()}` }));
+        chatWs.send(JSON.stringify({ type: 'chat', content: `${rolePrompt}\n\n对方说: ${text}\n\n请回复:`, history: [] }));
       };
-      setMessages(prev => [...prev, aiMsg]);
+      chatWs.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'chunk' && data.content) {
+          fullText += data.content;
+          setMessages(prev => prev.some(m => m.id === aiMsgId)
+            ? prev.map(m => m.id === aiMsgId ? { ...m, text: fullText } : m)
+            : [...prev, { id: aiMsgId, role: 'ai', text: fullText, timestamp: Date.now() }]);
+        } else if (data.type === 'done') {
+          if (!fullText) fullText = data.content || '好的，我理解了，我们继续练习吧！';
+          setMessages(prev => prev.some(m => m.id === aiMsgId)
+            ? prev.map(m => m.id === aiMsgId ? { ...m, text: fullText } : m)
+            : [...prev, { id: aiMsgId, role: 'ai', text: fullText, timestamp: Date.now() }]);
+          setIsAiResponding(false);
+          chatWs.close();
+        }
+      };
+      chatWs.onerror = () => {
+        if (!fullText) {
+          const fallback = selectedRole === 'foreign'
+            ? `Let's continue our conversation about ${selectedTopic}. What do you think?`
+            : `关于"${selectedTopic}"，让我们继续聊聊。你有什么想法？`;
+          setMessages(prev => [...prev, { id: aiMsgId, role: 'ai', text: fallback, timestamp: Date.now() }]);
+        }
+        setIsAiResponding(false);
+        chatWs.close();
+      };
     }
-  }, [selectedTopic, messages.length]);
+  }, [selectedTopic, selectedRole]);
 
   const endSession = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -347,11 +380,10 @@ export function SpeakingLab() {
                     <p>{msg.text}</p>
                     {msg.role === 'ai' && (
                       <button
-                        onClick={() => setIsPlaying(!isPlaying)}
+                        onClick={() => playTTS(msg.text)}
                         className="mt-2 flex items-center gap-1 text-xs opacity-70 hover:opacity-100"
                       >
-                        {isPlaying ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
-                        {isPlaying ? '暂停' : '朗读'}
+                        <Volume2 className="w-3 h-3" /> 朗读
                       </button>
                     )}
                   </div>
@@ -371,10 +403,10 @@ export function SpeakingLab() {
           <div className="max-w-2xl mx-auto">
             <div className="flex items-center gap-3">
               <button
-                onMouseDown={() => setIsRecording(true)}
-                onMouseUp={() => setIsRecording(false)}
-                onTouchStart={() => setIsRecording(true)}
-                onTouchEnd={() => setIsRecording(false)}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onTouchStart={startRecording}
+                onTouchEnd={stopRecording}
                 className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
                   isRecording
                     ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/30'

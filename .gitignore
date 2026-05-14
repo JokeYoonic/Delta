@@ -22,3 +22,7 @@ venv/
 *.sw?
 test-results/
 playwright-report/
+
+# Runtime data
+*.db
+chroma_data/

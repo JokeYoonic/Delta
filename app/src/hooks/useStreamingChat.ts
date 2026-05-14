@@ -14,13 +14,12 @@ export function useStreamingChat() {
   const addMessage = useStore((s) => s.addMessage);
   const currentConversation = useStore((s) => s.currentConversation);
   const setIsTyping = useStore((s) => s.setIsTyping);
-  const token = localStorage.getItem('delta_token');
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/^http/, 'ws');
-    const ws = new WebSocket(`${wsBase}/chat/ws/${token}`);
+    const ws = new WebSocket(`${wsBase}/chat/ws/dev`);
 
     ws.onopen = () => {
       wsRef.current = ws;
@@ -35,7 +34,7 @@ export function useStreamingChat() {
     };
 
     wsRef.current = ws;
-  }, [token]);
+  }, []);
 
   const sendMessage = useCallback(
     async (content: string) => {

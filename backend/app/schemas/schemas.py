@@ -76,9 +76,12 @@ class ConversationResponse(BaseModel):
     mode: str
     created_at: datetime
     updated_at: datetime
-    messages: list[ChatMessageResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class ConversationDetailResponse(ConversationResponse):
+    messages: list[ChatMessageResponse] = []
 
 
 class ExamSubmitRequest(BaseModel):

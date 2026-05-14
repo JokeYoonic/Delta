@@ -3,6 +3,7 @@ import type {
   User, Conversation, Exam, ExamResult, SpeakingSession,
   Subject, StudyReport, ParentDashboard, TutorConfig, ChatMessage
 } from '@/types';
+import { conversationApi, reportApi } from '@/api';
 
 interface AppState {
   // User
@@ -29,6 +30,9 @@ interface AppState {
   setTutorConfig: (config: TutorConfig) => void;
   setIsTyping: (typing: boolean) => void;
   createConversation: (subject: string) => Conversation;
+  createConversationAsync: (subject: string) => Promise<Conversation>;
+  loadConversations: () => Promise<void>;
+  loadReports: () => Promise<void>;
 
   // Exam
   currentExam: Exam | null;
@@ -185,38 +189,22 @@ const mockSubjects: Subject[] = [
 ];
 
 export const useStore = create<AppState>((set, get) => ({
-  // User
-  user: (() => {
-    try {
-      const saved = localStorage.getItem('delta_user');
-      return saved ? JSON.parse(saved) : null;
-    } catch { return null; }
-  })(),
-  setUser: (user) => {
-    if (user) {
-      localStorage.setItem('delta_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('delta_user');
-    }
-    set({ user, isSuperAdmin: user?.role === 'superadmin' });
+  // User — 开发阶段：跳过鉴权，始终为超级管理员
+  user: {
+    id: '77',
+    name: 'Super Admin',
+    email: 'user77@delta.ai',
+    avatar: '',
+    grade: '',
+    school: '',
+    role: 'superadmin',
+    points: 0,
+    streakDays: 0,
   },
-  isAuthenticated: (() => {
-    return !!localStorage.getItem('delta_token');
-  })(),
-  setIsAuthenticated: (auth) => {
-    if (!auth) {
-      localStorage.removeItem('delta_token');
-      localStorage.removeItem('delta_user');
-    }
-    set({ isAuthenticated: auth });
-  },
-  isSuperAdmin: (() => {
-    try {
-      const saved = localStorage.getItem('delta_user');
-      const user = saved ? JSON.parse(saved) : null;
-      return user?.role === 'superadmin';
-    } catch { return false; }
-  })(),
+  setUser: (user) => set({ user, isSuperAdmin: user?.role === 'superadmin' }),
+  isAuthenticated: true,
+  setIsAuthenticated: () => {},
+  isSuperAdmin: true,
 
   // Navigation
   currentPage: 'dashboard',
@@ -263,6 +251,56 @@ export const useStore = create<AppState>((set, get) => ({
       currentConversation: conv,
     }));
     return conv;
+  },
+  createConversationAsync: async (subject) => {
+    try {
+      const data = await conversationApi.create({ subject, title: `${subject} - 新对话` });
+      const conv: Conversation = {
+        id: data.id,
+        title: data.title || `${subject} - 新对话`,
+        messages: (data.messages || []).map((m: any) => ({
+          id: m.id, role: m.role, content: m.content,
+          timestamp: new Date(m.created_at).getTime(), type: 'text',
+        })),
+        subject: data.subject || subject,
+        createdAt: new Date(data.created_at).getTime(),
+        updatedAt: new Date(data.updated_at).getTime(),
+      };
+      set((state) => ({
+        conversations: [conv, ...state.conversations.filter(c => c.id !== conv.id)],
+        currentConversation: conv,
+      }));
+      return conv;
+    } catch {
+      return get().createConversation(subject);
+    }
+  },
+  loadConversations: async () => {
+    try {
+      const data = await conversationApi.list();
+      if (Array.isArray(data)) {
+        const convs: Conversation[] = data.map((c: any) => ({
+          id: c.id,
+          title: c.title || '未命名',
+          messages: (c.messages || []).map((m: any) => ({
+            id: m.id, role: m.role, content: m.content,
+            timestamp: new Date(m.created_at).getTime(), type: 'text' as const,
+          })),
+          subject: c.subject || '',
+          createdAt: new Date(c.created_at).getTime(),
+          updatedAt: new Date(c.updated_at).getTime(),
+        }));
+        if (convs.length > 0) {
+          set({ conversations: convs, currentConversation: convs[0] });
+        }
+      }
+    } catch { /* 后端未启动时静默忽略 */ }
+  },
+  loadReports: async () => {
+    try {
+      const report = await reportApi.getStudyReport('week');
+      if (report) set({ studyReport: report as StudyReport });
+    } catch { }
   },
 
   // Exam

@@ -4,11 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send, Image, Mic, Paperclip, Sparkles, User, Bot, BookOpen,
   Lightbulb, HelpCircle, ThumbsUp, ThumbsDown,
-  Copy, Check, Wand2, Camera, Users, Settings2
+  Copy, Check, Wand2, Camera, Users, Settings2, Calculator,
+  Atom, Globe, FlaskConical, Leaf, Scroll, LandPlot, BookmarkPlus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { conversationApi, ocrApi, agentsApi, tutorApi } from '@/api';
+import { conversationApi, ocrApi, agentsApi, tutorApi, ragApi, memoryBooksApi } from '@/api';
 import { useStreamingChat } from '@/hooks/useStreamingChat';
 import type { ChatMessage, RAGSource } from '@/types';
 
@@ -40,6 +41,18 @@ const commStyleOptions = [
   { value: 'storytelling', label: '故事式', desc: '场景包装' },
 ];
 
+const subjects = [
+  { id: 'math', name: '数学', icon: Calculator, color: 'text-blue-600 bg-blue-50 border-blue-200' },
+  { id: 'chinese', name: '语文', icon: Scroll, color: 'text-red-600 bg-red-50 border-red-200' },
+  { id: 'english', name: '英语', icon: Globe, color: 'text-emerald-600 bg-emerald-50 border-emerald-200' },
+  { id: 'physics', name: '物理', icon: Atom, color: 'text-purple-600 bg-purple-50 border-purple-200' },
+  { id: 'chemistry', name: '化学', icon: FlaskConical, color: 'text-orange-600 bg-orange-50 border-orange-200' },
+  { id: 'biology', name: '生物', icon: Leaf, color: 'text-green-600 bg-green-50 border-green-200' },
+  { id: 'history', name: '历史', icon: LandPlot, color: 'text-amber-600 bg-amber-50 border-amber-200' },
+  { id: 'geography', name: '地理', icon: Globe, color: 'text-cyan-600 bg-cyan-50 border-cyan-200' },
+  { id: 'politics', name: '政治', icon: BookOpen, color: 'text-indigo-600 bg-indigo-50 border-indigo-200' },
+];
+
 const suggestions = [
   { icon: HelpCircle, text: '一元二次方程的求根公式是什么？' },
   { icon: BookOpen, text: '帮我讲解一下Unit 1的语法重点' },
@@ -48,7 +61,7 @@ const suggestions = [
 ];
 
 export function AIChat() {
-  const { currentConversation, createConversation, addMessage, setIsTyping, isTyping, setCurrentConversation } = useStore();
+  const { currentConversation, createConversation, createConversationAsync, addMessage, setIsTyping, isTyping, setCurrentConversation } = useStore();
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
@@ -56,6 +69,7 @@ export function AIChat() {
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [showTutorConfig, setShowTutorConfig] = useState(false);
+  const [showSubjectPicker, setShowSubjectPicker] = useState(false);
   const [tutorConfig, setTutorConfig] = useState({
     depth: 3,
     learning_style: 'visual',
@@ -109,13 +123,13 @@ export function AIChat() {
 
       await new Promise<void>((resolve, reject) => {
         const wsBase = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(/^http/, 'ws');
-        const token = localStorage.getItem('delta_token');
-        const ws = new WebSocket(`${wsBase}/chat/ws/${token}`);
+        const ws = new WebSocket(`${wsBase}/chat/ws/dev`);
 
         ws.onopen = () => {
           ws.send(JSON.stringify({
             type: 'init',
             conversation_id: conv!.id,
+            subject: conv?.subject || '',
             ...(selectedAgent ? { agent_role: selectedAgent } : {}),
             tutor_config: tutorConfig,
           }));
@@ -123,6 +137,7 @@ export function AIChat() {
             type: 'chat',
             content: msgContent,
             conversation_id: conv!.id,
+            subject: conv?.subject || '',
             history: conv!.messages.map(m => ({ role: m.role, content: m.content })),
             ...(selectedAgent ? { agent_role: selectedAgent } : {}),
             tutor_config: tutorConfig,
@@ -135,15 +150,36 @@ export function AIChat() {
             fullContent += data.content;
             setStreamingContent(fullContent);
           } else if (data.type === 'done') {
+            const content = data.content || fullContent;
             const aiMsg: ChatMessage = {
               id: aiMsgId,
               role: 'assistant',
-              content: data.content || fullContent,
+              content,
               timestamp: Date.now(),
               type: 'text',
               ragSources: data.data?.rag_sources || [],
             };
             addMessage(aiMsg);
+            // 保存到后端
+            if (conv && conv.id) {
+              conversationApi.addMessage(conv.id, { content: msgContent, message_type: 'text' }).catch(() => {});
+              conversationApi.addMessage(conv.id, { content, message_type: 'text' }).catch(() => {});
+            }
+            // 自动错题检测：用户说不会/不懂/错了时收录到知识笔记
+            const confusedKeywords = ['不会', '不懂', '不明白', '错了', '为什么错', '怎么做', '帮帮我', '太难了', '没听懂'];
+            if (confusedKeywords.some(k => msgContent.includes(k))) {
+              const noteTitle = msgContent.slice(0, 40);
+              memoryBooksApi.list().then((books: any[]) => {
+                const book = Array.isArray(books) && books.length > 0 ? books[0] : null;
+                if (book && (book as any).id) {
+                  memoryBooksApi.createEntry((book as any).id, {
+                    title: noteTitle,
+                    content: `**我的问题:** ${msgContent}\n\n**AI讲解:** ${content.slice(0, 500)}`,
+                    tags: [conv?.subject || '数学', '错题'],
+                  }).catch(() => {});
+                }
+              }).catch(() => {});
+            }
             setStreamingContent('');
             setStreamingSources([]);
             setIsTyping(false);
@@ -206,6 +242,33 @@ export function AIChat() {
     reader.readAsDataURL(file);
   }, []);
 
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await ragApi.upload(file, 'delta-textbooks');
+      // 上传成功提示——用一条系统消息提醒用户
+      const sysMsg: ChatMessage = {
+        id: `msg-upload-${Date.now()}`,
+        role: 'assistant',
+        content: `教材"${file.name}"已上传至知识库，AI 将基于此内容回答相关问题。`,
+        timestamp: Date.now(),
+        type: 'text',
+      };
+      addMessage(sysMsg);
+    } catch {
+      const errMsg: ChatMessage = {
+        id: `msg-upload-err-${Date.now()}`,
+        role: 'assistant',
+        content: `上传"${file.name}"失败，请确认文件格式（支持 PDF/DOCX/TXT/MD）。`,
+        timestamp: Date.now(),
+        type: 'text',
+      };
+      addMessage(errMsg);
+    }
+    e.target.value = '';
+  }, [addMessage]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -243,12 +306,32 @@ export function AIChat() {
       <div className="hidden lg:flex w-64 border-r border-slate-200 dark:border-slate-700 flex-col bg-slate-50/50 dark:bg-slate-900/50">
         <div className="p-4 border-b border-slate-200 dark:border-slate-700">
           <Button
-            onClick={() => createConversation('数学')}
+            onClick={() => setShowSubjectPicker(!showSubjectPicker)}
             className="w-full rounded-xl bg-violet-600 hover:bg-violet-700 text-white"
           >
             <Sparkles className="w-4 h-4 mr-2" />
             新建对话
           </Button>
+          {showSubjectPicker && (
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              {subjects.map(s => {
+                const Icon = s.icon;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => {
+                      createConversationAsync(s.name);
+                      setShowSubjectPicker(false);
+                    }}
+                    className={`flex flex-col items-center gap-0.5 py-2 px-1 rounded-lg text-xs border transition-all ${s.color} hover:scale-105`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         <ScrollArea className="flex-1 p-2">
           <div className="space-y-1">
@@ -275,7 +358,7 @@ export function AIChat() {
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4">
+        <ScrollArea className="flex-1 min-h-0 p-4">
           {!currentConversation?.messages.length ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center mb-4">
@@ -347,6 +430,34 @@ export function AIChat() {
                           </button>
                           <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" title="无用">
                             <ThumbsDown className="w-3 h-3 text-slate-400" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              memoryBooksApi.list().then((books: any[]) => {
+                                const book = Array.isArray(books) && books.length > 0 ? books[0] : null;
+                                const qMsg = currentConversation?.messages.find((m, i) =>
+                                  i < currentConversation.messages.indexOf(msg) && m.role === 'user'
+                                );
+                                if (book && (book as any).id) {
+                                  memoryBooksApi.createEntry((book as any).id, {
+                                    title: (qMsg?.content || msg.content).slice(0, 40),
+                                    content: qMsg
+                                      ? `**问题:** ${qMsg.content}\n\n**回答:** ${msg.content.slice(0, 800)}`
+                                      : msg.content.slice(0, 800),
+                                    tags: [currentConversation?.subject || '通用', '收藏'],
+                                  }).catch(() => {});
+                                  // 轻提示
+                                  const btn = document.activeElement as HTMLElement;
+                                  const orig = btn?.title || '';
+                                  btn?.setAttribute?.('title', '已收录!');
+                                  setTimeout(() => btn?.setAttribute?.('title', orig), 1000);
+                                }
+                              }).catch(() => {});
+                            }}
+                            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                            title="收录到知识笔记"
+                          >
+                            <BookmarkPlus className="w-3 h-3 text-amber-400" />
                           </button>
                         </div>
                       )}
@@ -574,9 +685,10 @@ export function AIChat() {
                 <button className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500">
                   <Mic className="w-4 h-4" />
                 </button>
-                <button className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500">
+                <label className="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-slate-500 cursor-pointer" title="上传教材文件">
                   <Paperclip className="w-4 h-4" />
-                </button>
+                  <input type="file" accept=".pdf,.docx,.doc,.txt,.md" className="hidden" onChange={handleFileUpload} />
+                </label>
               </div>
               <textarea
                 ref={inputRef}
