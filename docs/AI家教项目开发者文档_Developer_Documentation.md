@@ -44,13 +44,13 @@ Delta 是项目的骨架仓库（fork 自 `JokeYoonic/Delta`），当前版本 *
 - **前端**：Vite + React 19 + React Router 7 + Radix UI + Tailwind CSS 3 + Zustand
 - **认证**：Logto OAuth/OIDC（支持手机验证码 + Google OAuth）
 - **LLM 网关**：bifrost 统一路由（DeepSeek 主 / Qwen 备 / GLM 备 / OpenAI 备）
-- **RAG 引擎**：RAGFlow Docker 部署（内置 docling 文档解析）
-- **语音管道**：Pipecat 编排，FunASR (ASR) + Kokoro (TTS) 自研引擎，faster-whisper + edge-tts 降级
+- **RAG 引擎**：ChromaDB（轻量级本地向量数据库，随 pip 安装）
+- **语音管道**：Pipecat 编排，Edge-TTS (TTS) + 本地 FunASR (ASR) 默认引擎，Kokoro/faster-whisper Docker 版可选
 - **OCR**：RapidOCR（轻量 ONNX）主引擎 + PaddleOCR-VL 高精度备选
 - **Skills 插件系统**：ZhixuebanSkill 抽象基类 + 自动注册机制
 - **Agent 多角色**：严厉老师 / 温柔学姐 / 同龄学伴 / 外教 + 主控 Agent 调度
 - **测试体系**：Playwright E2E + DeepEval LLM 质量 + Promptfoo Red-team + RAGAS RAG 评估 + k6 性能压测
-- **基础设施**：Docker Compose 一键启动完整服务栈（PostgreSQL + Redis + bifrost + RAGFlow + FunASR + Kokoro + faster-whisper）
+- **基础设施**：Docker Compose Profile 分层启动（核心基础设施默认 + 语音/应用服务按需）
 
 ### 1.4 设计文档体系
 
@@ -95,7 +95,7 @@ Delta 是项目的骨架仓库（fork 自 `JokeYoonic/Delta`），当前版本 *
 ┌────────────────────────────▼────────────────────────────────────┐
 │                    AI 能力层（开源组件集群）                        │
 │  ├─ bifrost (:8080)         — LLM 统一网关（故障转移/缓存/预算）   │
-│  ├─ RAGFlow (:9380, :80)   — RAG 检索引擎（内置 docling 解析）    │
+│  ├─ ChromaDB (本地 pip)    — RAG 向量检索引擎（轻量级，无需 Docker）  │
 │  ├─ FunASR (:10095)        — 中文语音识别 (ASR)                   │
 │  ├─ Kokoro (:8880)         — 轻量 TTS 语音合成                    │
 │  ├─ faster-whisper (:10300) — 英文/降级 ASR                       │
@@ -131,7 +131,7 @@ backend/
 │   │   ├── memory_books.py        # 个人知识笔记本（agnai Memory Books）
 │   │   ├── ocr.py                 # OCR 拍照搜题
 │   │   ├── parent.py              # 家长监管后台
-│   │   ├── rag.py                 # RAGFlow 知识库管理接口
+│   │   ├── rag.py                 # RAG 知识库管理接口
 │   │   ├── reports.py             # 学情报告
 │   │   ├── skills.py              # Skills 插件管理
 │   │   ├── speaking.py            # 口语训练
@@ -146,7 +146,7 @@ backend/
 │   │   ├── logto_service.py       # Logto 认证服务封装
 │   │   ├── memory_engine.py       # 记忆引擎（学习画像）
 │   │   ├── ocr_service.py         # OCR 服务（RapidOCR/PaddleOCR）
-│   │   ├── rag_service.py         # RAG 检索服务（RAGFlow API）
+│   │   ├── rag_service.py         # RAG 检索服务（ChromaDB）
 │   │   ├── security_service.py    # 安全层（Tool Guard + File Guard）
 │   │   ├── sm2_scheduler.py       # SM-2 间隔重复复习调度
 │   │   ├── study_tracker.py       # 学习追踪器
@@ -230,7 +230,7 @@ app/
 | 决策点 | v0.1（原始 Delta） | v0.2（当前） | 依据 |
 |--------|---------------------|-------------|------|
 | LLM 调用方式 | 直接调用各 API | **bifrost 统一网关** | 故障转移、语义缓存降本30-50%、预算管理、Guardrails |
-| RAG 引擎 | — | **RAGFlow**（内置 docling） | 80.2k Stars，省去独立预处理管道 |
+| RAG 引擎 | — | **ChromaDB**（轻量级本地向量数据库） | 随 pip 安装，无需 Docker，零运维 |
 | 全栈底座 | — | **Vite + FastAPI 独立架构** | 轻量化，未采用 vstorm 全量模板，但借鉴其 AI Agent 设计理念 |
 | Agent 架构 | — | **Skills 插件化 + 多 Agent 协作** | QwenPaw 参考，功能模块化，新增学科只需开发 Skill |
 | 数据库 | SQLite（本地开发） | **PostgreSQL + pgvector** | 生产级 + 向量存储，预留 Neon Serverless 迁移路径 |
@@ -246,7 +246,7 @@ app/
 
 | 项目 | 路径 | 用途 | 整合阶段 |
 |------|------|------|:---:|
-| **RAGFlow** | `参考项目/ragflow/` | RAG 检索引擎——教材 PDF 解析、chunking、向量检索、Agent 工作流 | MVP（已集成） |
+| **ChromaDB** | `pip install chromadb` | RAG 向量检索引擎——教材知识库存储、语义检索、增量更新 | MVP（已集成） |
 | **lago** | `参考项目/lago/` | 开源计费平台——订阅管理、使用量计量、发票生成 | V2.0 |
 | **ai-code-review-helper** | `参考项目/ai-code-review-helper/` | AI 自动化 PR 审查——安全风险检测、代码规范检查 | V1.0 |
 
@@ -263,7 +263,7 @@ app/
 | **faster-whisper** | `fedirz/faster-whisper-server:latest-cpu` | `docker-compose.yml` → `faster-whisper` 服务 | ASR 降级 |
 | **bifrost** | `maximhq/bifrost:latest` | `docker-compose.yml` → `bifrost` 服务 | LLM 网关 |
 | **Logto** | `svhd/logto:latest` | `docker-compose.yml` → `logto` 服务 | 认证服务 |
-| **Elasticsearch** | `elasticsearch:8.11.3` | `docker-compose.yml` → `elasticsearch` 服务 | RAGFlow 依赖 |
+| **Elasticsearch** | ~~已移除~~ | ~~RAGFlow 依赖，已由 ChromaDB 替代~~ | 已移除 |
 
 #### 3.2.2 设计/架构参考项目（阅读文档即用）
 
@@ -281,12 +281,12 @@ app/
 | **vstorm full-stack-ai-agent-template** (614 Stars) | FastAPI+Next.js+AI Agent+RAG 全栈模板 | 架构理念参考（Delta 采用更轻量的独立架构） |
 | **PaddleOCR** (~40k Stars) | OCR + 文档解析，109 种语言 | 通过 Docker 镜像 `paddleocr/paddleocr:latest` 按需部署 |
 | **Umi-OCR** (~30k Stars) | 离线 OCR 软件，PC 端截图识别 | 后续 Electron 端集成（HTTP 接口） |
-| **docling** (~3k Stars) | IBM 高级 PDF 理解 | 已内置在 RAGFlow 中，RAGFlow 上传 PDF 自动调用 docling 解析 |
+| **docling** (~3k Stars) | IBM 高级 PDF 理解 | 可独立用于教材预处理，ChromaDB 负责向量存储与检索 |
 | **Pipecat** (~5k Stars) | 语音对话管道（ASR→LLM→TTS 编排） | 通过 `pipecat-ai` Python 包集成，在 `services/voice_service.py` 中使用 |
 | **F5-TTS** (~10k Stars) | 情感语音合成/声音克隆 | V3.0 阶段用于 AI 角色固定音色 |
 | **Promptfoo** | LLM Red-teaming 测试框架 | CI/CD 集成，配置在 `tests/promptfooconfig.yaml` |
 | **DeepEval** | LLM 质量指标（14+ 指标） | 通过 `deepeval` Python 包集成，测试用例在 `tests/llm/` |
-| **RAGAS** | RAG 管道评估 | 月度评估 RAGFlow 检索精度 |
+| **RAGAS** | RAG 管道评估 | 月度评估 ChromaDB 检索精度 |
 | **k6** | 性能压测 | 脚本在 `tests/perf/k6-load-test.js` |
 | **Aider** | AI 结对编程 | 开发工具推荐，非代码依赖 |
 | **Continue.dev** | IDE 内 AI 辅助 | 开发工具推荐，非代码依赖 |
@@ -317,7 +317,7 @@ app/
 
 | 依赖组 | 包 | 用途 |
 |--------|-----|------|
-| `[rag]` | ragflow-sdk | RAGFlow API 客户端 |
+| `[rag]` | ~~ragflow-sdk~~ | ~~已移除，改用 chromadb 核心依赖~~ |
 | `[ocr]` | rapidocr-onnxruntime, paddleocr, paddlepaddle | OCR 拍照搜题 |
 | `[voice]` | pipecat-ai, funasr, faster-whisper, kokoro, edge-tts | 语音引擎 |
 | `[billing]` | lago-python-client | 计费服务 |
@@ -352,8 +352,7 @@ app/
 | **缓存** | Redis | 7-alpine | 6379 |
 | **LLM 网关** | bifrost | latest | 8080 |
 | **认证** | Logto | latest | 3301, 3302 |
-| **RAG 引擎** | RAGFlow | latest | 9380, 80 |
-| **RAG 依赖** | Elasticsearch | 8.11.3 | 9200 |
+| **RAG 引擎** | ChromaDB | >=0.5.0 | 本地 pip 安装 |
 | **ASR 引擎** | FunASR | latest | 10095 |
 | **TTS 引擎** | Kokoro | latest | 8880 |
 | **ASR 降级** | faster-whisper | latest-cpu | 10300 |
@@ -399,8 +398,8 @@ class ZhixuebanSkill(ABC):
 
 | Skill | 触发词 | 核心能力 | 文件 |
 |-------|--------|----------|------|
-| **QASkill** | 问答、问题、怎么做、求解 | LLM+RAGFlow 答疑 | `skills/qa_skill.py` |
-| **TextbookSkill** | 教材、课本、章节 | RAGFlow 知识库查询 | `skills/textbook_skill.py` |
+| **QASkill** | 问答、问题、怎么做、求解 | LLM+ChromaDB 答疑 | `skills/qa_skill.py` |
+| **TextbookSkill** | 教材、课本、章节 | ChromaDB 知识库查询 | `skills/textbook_skill.py` |
 | **ClassroomSkill** | 课堂、学习、上课 | AI 课堂（Book Engine 参考） | `skills/classroom_skill.py` |
 | **ExamSkill** | 考试、测验、练习、组卷 | 三种模式考试+AI 批改 | `skills/exam_skill.py` |
 | **OralSkill** | 口语、说话、发音、对话 | Pipecat 语音管道 | `skills/oral_skill.py` |
@@ -432,7 +431,7 @@ class ZhixuebanSkill(ABC):
 **核心流程**：
 
 ```
-学生提问 → bifrost Guardrails 过滤 → RAGFlow 检索（教材 chunk + 上下文）
+学生提问 → bifrost Guardrails 过滤 → ChromaDB 检索（教材 chunk + 上下文）
          → 构建 System Prompt（身份+深度+风格+安全）
          → LLM 推理（通过 bifrost 路由至 DeepSeek/Qwen）
          → bifrost 语义缓存（相似问题直接返回）
@@ -440,7 +439,7 @@ class ZhixuebanSkill(ABC):
 ```
 
 **关键组件**：
-- `services/rag_service.py`：封装 RAGFlow API 调用（检索 + Agent 工作流）
+- `services/rag_service.py`：封装 ChromaDB 向量检索（检索 + 增量更新）
 - `services/ai_tutor.py`：System Prompt 构建（Mr.-Ranedeer 方法论）
 - `services/bifrost_gateway.py`：bifrost 网关客户端（故障转移 + 缓存 + 预算）
 - `services/security_service.py`：三层安全（Tool Guard + File Access Guard）
@@ -454,7 +453,7 @@ class ZhixuebanSkill(ABC):
 | **RapidOCR**（主） | 印刷体、手写体常规题目 | ONNX Runtime 微服务 | `OCR_ENGINE=rapidocr` |
 | **PaddleOCR-VL**（备） | 数学公式、复杂版面、多语言 | Docker 服务 | `OCR_ENGINE=paddleocr` |
 
-**流程**：学生上传图片 → RapidOCR 快速识别 → 置信度<0.6 时自动降级 PaddleOCR-VL → 识别文本送入 RAGFlow 检索相似题 → LLM 生成讲解。
+**流程**：学生上传图片 → RapidOCR 快速识别 → 置信度<0.6 时自动降级 PaddleOCR-VL → 识别文本送入 ChromaDB 检索相似题 → LLM 生成讲解。
 
 ### 5.5 语音对话系统
 
@@ -518,7 +517,7 @@ class ZhixuebanSkill(ABC):
 
 - [x] Fork Delta 仓库，克隆到本地
 - [ ] 配置 `.env` 文件（DeepSeek API Key + 各服务端口）
-- [ ] `docker compose up -d` 启动完整服务栈（PostgreSQL + Redis + bifrost + Logto + RAGFlow + Elasticsearch + FunASR + Kokoro + faster-whisper）
+- [ ] `docker compose up -d` 启动核心基础设施（PostgreSQL + Redis + bifrost + Logto）
 - [ ] 配置 bifrost：4 个 LLM 提供商 + 虚拟密钥 + Guardrails 规则 + 语义缓存
 - [ ] 验证各服务健康状态（`/health` 端点）
 - **交付物**：一键启动的开发环境，所有服务绿亮
@@ -526,7 +525,7 @@ class ZhixuebanSkill(ABC):
 #### 第 2 周：后端核心 API 开发
 
 - [ ] 完善 `services/ai_tutor.py`：System Prompt 模板（Mr.-Ranedeer 方法论移植）
-- [ ] 完善 `services/rag_service.py`：RAGFlow API 集成（知识库创建 + 检索 + Agent 工作流）
+- [ ] 完善 `services/rag_service.py`：ChromaDB 向量检索集成（知识库创建 + 检索 + 增量更新）
 - [ ] 完善 `services/bifrost_gateway.py`：bifrost 客户端（故障转移 + 语义缓存 + 预算控制）
 - [ ] 完善 `api/chat.py`：WebSocket 流式对话 API
 - [ ] 完善 `api/auth.py`：Logto OAuth 集成（手机验证码 + Google OAuth）
@@ -535,9 +534,9 @@ class ZhixuebanSkill(ABC):
 
 #### 第 3-4 周：教材知识库构建
 
-- [ ] 通过 RAGFlow Web 界面创建"人教版初中主科"知识库
+- [ ] 通过 seed_unified.py 脚本导入"人教版初中主科"知识到 ChromaDB
 - [ ] 上传 9 本 PDF 教材（数学/语文/英语 × 七/八/九年级）
-- [ ] RAGFlow 自动 docling 解析 → 可视化 chunking 确认 → 启用索引
+- [ ] ChromaDB 自动向量化 → 验证检索质量
 - [ ] MongoDB 存储教材元数据（章节树 + 知识点关联）
 - [ ] `api/knowledge.py`：教材章节浏览 API
 - **交付物**：9 本教材向量化，RAG 检索可用
@@ -628,7 +627,7 @@ docker compose up -d
 
 # 4. 等待所有服务就绪后，访问：
 # - 后端 API 文档: http://localhost:8000/docs
-# - RAGFlow Web UI: http://localhost
+# - ChromaDB: 本地 pip 安装，无需 Docker
 # - Logto Admin Console: http://localhost:3302
 # - bifrost Dashboard: http://localhost:8080
 
@@ -655,7 +654,7 @@ k6 run tests/perf/k6-load-test.js                     # 性能压测
 | **后端 (FastAPI)** | 8000 | http://localhost:8000 |
 | **API 文档 (Swagger)** | 8000 | http://localhost:8000/docs |
 | **bifrost** | 8080 | http://localhost:8080 |
-| **RAGFlow** | 80 / 9380 | http://localhost |
+| **ChromaDB** | 本地 pip | 随 pip install 安装 |
 | **Logto** | 3301 / 3302 | http://localhost:3301 |
 | **PostgreSQL** | 5432 | `postgresql://delta:delta@localhost:5432/delta_ai` |
 | **Redis** | 6379 | `redis://localhost:6379/0` |
@@ -676,7 +675,8 @@ k6 run tests/perf/k6-load-test.js                     # 性能压测
 | `OCR_ENGINE` | OCR 引擎选择 | `rapidocr` |
 | `ASR_ENGINE` | ASR 引擎选择 | `funasr` |
 | `TTS_ENGINE` | TTS 引擎选择 | `kokoro` |
-| `RAGFLOW_API_KEY` | RAGFlow API 密钥 | (部署后获取) |
+| `CHROMA_COLLECTION_NAME` | ChromaDB 集合名 | delta-textbooks |
+| `CHROMA_PERSIST_DIR` | ChromaDB 持久化目录 | ./data/chroma |
 
 ### 7.4 开发规范
 
@@ -715,7 +715,7 @@ chore: 构建/工具链变更
 | **SQLite → PostgreSQL 迁移** | 当前 `DATABASE_URL` 默认为 SQLite 便于本地开发，生产必须切换 PostgreSQL | 高 |
 | **Neon Serverless 迁移** | 当前自托管 PostgreSQL，V1.0 后评估迁移至 Neon（每学生独立分支） | 中 |
 | **Skills 注册表并发安全** | 当前为内存注册表，多进程部署需改为 Redis/DB 存储 | 中 |
-| **RAGFlow API Key 管理** | 当前通过 `.env` 配置，需建立 API Key 轮换机制 | 中 |
+| **ChromaDB 数据安全** | 本地持久化存储，需定期备份 `data/chroma/` 目录 | 中 |
 | **口语模块完成度** | 口语 Skill 框架已搭建，ASR/TTS 适配器待完善（预估 5-8 天） | 中 |
 | **MCP 工具链** | 计算器/绘图/公式验证工具待集成（bifrost MCP 网关已预留） | 低 |
 

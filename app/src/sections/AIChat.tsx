@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { conversationApi, ocrApi, agentsApi, tutorApi, ragApi, memoryBooksApi } from '@/api';
+import type { EnsureDefaultResponse } from '@/api/client';
 import { useStreamingChat } from '@/hooks/useStreamingChat';
 import type { ChatMessage, RAGSource } from '@/types';
 
@@ -432,27 +433,37 @@ export function AIChat() {
                             <ThumbsDown className="w-3 h-3 text-slate-400" />
                           </button>
                           <button
-                            onClick={() => {
-                              memoryBooksApi.list().then((books: any[]) => {
-                                const book = Array.isArray(books) && books.length > 0 ? books[0] : null;
-                                const qMsg = currentConversation?.messages.find((m, i) =>
-                                  i < currentConversation.messages.indexOf(msg) && m.role === 'user'
-                                );
-                                if (book && (book as any).id) {
-                                  memoryBooksApi.createEntry((book as any).id, {
-                                    title: (qMsg?.content || msg.content).slice(0, 40),
-                                    content: qMsg
-                                      ? `**问题:** ${qMsg.content}\n\n**回答:** ${msg.content.slice(0, 800)}`
-                                      : msg.content.slice(0, 800),
-                                    tags: [currentConversation?.subject || '通用', '收藏'],
-                                  }).catch(() => {});
-                                  // 轻提示
-                                  const btn = document.activeElement as HTMLElement;
-                                  const orig = btn?.title || '';
-                                  btn?.setAttribute?.('title', '已收录!');
-                                  setTimeout(() => btn?.setAttribute?.('title', orig), 1000);
-                                }
-                              }).catch(() => {});
+                            onClick={async () => {
+                              try {
+                                const defaultBook: EnsureDefaultResponse = await memoryBooksApi.ensureDefault();
+                                const msgIdx = currentConversation?.messages.indexOf(msg) ?? -1;
+                                const qMsg = currentConversation?.messages
+                                  .slice(0, msgIdx)
+                                  .reverse()
+                                  .find(m => m.role === 'user');
+                                await memoryBooksApi.createEntry(defaultBook.id, {
+                                  title: (qMsg?.content || msg.content).slice(0, 40),
+                                  content: qMsg
+                                    ? `**问题:** ${qMsg.content}\n\n**回答:** ${msg.content.slice(0, 800)}`
+                                    : msg.content.slice(0, 800),
+                                  tags: [currentConversation?.subject || '通用', '收藏'],
+                                });
+                                addMessage({
+                                  id: `msg-bookmark-${Date.now()}`,
+                                  role: 'assistant',
+                                  content: `已收录到"${defaultBook.title}"`,
+                                  timestamp: Date.now(),
+                                  type: 'text',
+                                });
+                              } catch (err) {
+                                addMessage({
+                                  id: `msg-bookmark-err-${Date.now()}`,
+                                  role: 'assistant',
+                                  content: '收录失败，请稍后重试',
+                                  timestamp: Date.now(),
+                                  type: 'text',
+                                });
+                              }
                             }}
                             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                             title="收录到知识笔记"

@@ -1,5 +1,5 @@
 from app.skills.base import ZhixuebanSkill, SkillContext, SkillResult
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 
 
 class TextbookSkill(ZhixuebanSkill):
@@ -10,7 +10,7 @@ class TextbookSkill(ZhixuebanSkill):
 
     async def execute(self, context: SkillContext) -> SkillResult:
         try:
-            result = await ragflow_service.query(
+            result = await rag_service.query(
                 question=context.message,
                 kb_name=context.extra.get("kb_name"),
             )

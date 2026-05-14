@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from app.core.security import get_current_user
 from app.models import User
-from app.services import ragflow_service
+from app.services import rag_service
 from app.schemas import RAGQueryRequest, RAGQueryResponse
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -12,7 +12,7 @@ async def query_rag(
     data: RAGQueryRequest,
     current_user: User = Depends(get_current_user),
 ):
-    result = await ragflow_service.query(data.question, data.kb_name, data.top_k)
+    result = await rag_service.query(data.question, data.kb_name, data.top_k)
     return RAGQueryResponse(
         answer=result["answer"],
         sources=result["sources"],
@@ -30,20 +30,19 @@ async def upload_textbook(
         raise HTTPException(status_code=400, detail="Only PDF, DOCX, TXT, MD files are supported")
 
     file_content = await file.read()
-    dataset_id = await ragflow_service.get_or_create_dataset(kb_name)
-    result = await ragflow_service.upload_document(dataset_id, file.filename, file_content)
+    result = await rag_service.upload_document(kb_name, file.filename, file_content)
 
     return {
-        "status": "uploaded",
+        "status": result.get("status", "uploaded"),
         "filename": file.filename,
-        "dataset_id": dataset_id,
+        "dataset_id": kb_name,
         "detail": result,
     }
 
 
 @router.get("/datasets")
 async def list_datasets(current_user: User = Depends(get_current_user)):
-    datasets = await ragflow_service.list_datasets()
+    datasets = await rag_service.list_datasets()
     return {"datasets": datasets}
 
 
@@ -52,5 +51,5 @@ async def list_documents(
     dataset_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    documents = await ragflow_service.list_documents(dataset_id)
+    documents = await rag_service.list_documents(dataset_id)
     return {"documents": documents}

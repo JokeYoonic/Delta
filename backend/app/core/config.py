@@ -49,18 +49,19 @@ class Settings(BaseSettings):
     NEON_PROJECT_ID: str = ""
     NEON_BRANCH_PREFIX: str = "student-"
 
-    RAGFLOW_API_URL: str = "http://localhost:9380"
-    RAGFLOW_API_KEY: str = ""
-    RAGFLOW_KB_NAME: str = "delta-textbooks"
+    CHROMA_COLLECTION_NAME: str = "delta-textbooks"
+    CHROMA_PERSIST_DIR: str = "chroma_data"
+    CHUNK_SIZE: int = 500
+    CHUNK_OVERLAP: int = 80
 
     OCR_ENGINE: str = "rapidocr"
     PADDLEOCR_URL: str = "http://localhost:8868"
 
-    ASR_ENGINE: str = "funasr"
+    ASR_ENGINE: str = "local_funasr"
     FUNASR_URL: str = "http://localhost:10095"
     FASTER_WHISPER_URL: str = "http://localhost:10300"
 
-    TTS_ENGINE: str = "kokoro"
+    TTS_ENGINE: str = "edge_tts"
     KOKORO_URL: str = "http://localhost:8880"
     EDGE_TTS_VOICE: str = "zh-CN-XiaoxiaoNeural"
 

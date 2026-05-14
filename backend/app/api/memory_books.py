@@ -44,6 +44,28 @@ class EntryUpdate(BaseModel):
     order: Optional[int] = None
 
 
+@router.post("/ensure-default")
+async def ensure_default_book(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MemoryBook).where(MemoryBook.user_id == current_user.id).order_by(MemoryBook.updated_at.desc())
+    )
+    books = result.scalars().all()
+    if books:
+        book = books[0]
+        return {"id": book.id, "title": book.title, "created": False}
+    book = MemoryBook(
+        user_id=current_user.id,
+        title="我的知识笔记",
+        description="自动创建的默认知识笔记",
+        subject="",
+        is_public=False,
+    )
+    db.add(book)
+    await db.flush()
+    await db.refresh(book)
+    return {"id": book.id, "title": book.title, "created": True}
+
+
 @router.get("")
 async def list_books(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(

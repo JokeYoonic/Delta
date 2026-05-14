@@ -1,7 +1,7 @@
 """扩展版全科种子脚本——9科知识点 + 习题，写入 ChromaDB。"""
 import os, sys, re, asyncio, argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 
 EXTRA = {
     "化学": [
@@ -50,7 +50,7 @@ async def seed_subjects(kb_name="delta-textbooks"):
     total = 0
     for subject, texts in EXTRA.items():
         content = "\n\n".join(texts)
-        result = await ragflow_service.upload_document(kb_name, f"{subject}_知识库.txt", content.encode("utf-8"))
+        result = await rag_service.upload_document(kb_name, f"{subject}_知识库.txt", content.encode("utf-8"))
         print(f"[{subject}] {result['status']}: {result.get('chunks', 0)} chunks")
         total += result.get("chunks", 0)
     print(f"\n新增: {total} chunks 写入 '{kb_name}'")

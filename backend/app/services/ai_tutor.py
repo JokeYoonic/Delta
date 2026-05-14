@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Optional
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 
 SYSTEM_PROMPT_BASE = """你是Delta AI家教，一个专业、友好、耐心的AI教学助手。你的核心使命是帮助学生理解和掌握知识，而不是直接给出答案。
 
@@ -118,7 +118,7 @@ class AITutorEngine:
             last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             if last_user_msg:
                 try:
-                    rag_result = await ragflow_service.query(last_user_msg, kb_name)
+                    rag_result = await rag_service.query(last_user_msg, kb_name)
                     if rag_result.get("answer"):
                         context = f"\n\n## 参考教材内容\n{rag_result['answer']}"
                     if rag_result.get("sources"):
@@ -153,7 +153,7 @@ class AITutorEngine:
             last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             if last_user_msg:
                 try:
-                    rag_result = await ragflow_service.query(last_user_msg, kb_name)
+                    rag_result = await rag_service.query(last_user_msg, kb_name)
                     if rag_result.get("answer"):
                         context = f"\n\n## 参考教材内容\n{rag_result['answer']}"
                     if rag_result.get("sources"):
@@ -186,7 +186,7 @@ class AITutorEngine:
             last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             if last_user_msg:
                 try:
-                    rag_result = await ragflow_service.query(last_user_msg, kb_name)
+                    rag_result = await rag_service.query(last_user_msg, kb_name)
                     if rag_result.get("answer"):
                         context = f"\n\n## 参考教材内容\n{rag_result['answer']}"
                 except Exception:
@@ -222,7 +222,7 @@ class AITutorEngine:
             last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
             if last_user_msg:
                 try:
-                    rag_result = await ragflow_service.query(last_user_msg, kb_name)
+                    rag_result = await rag_service.query(last_user_msg, kb_name)
                     if rag_result.get("answer"):
                         context = f"\n\n## 参考教材内容\n{rag_result['answer']}"
                     if rag_result.get("sources"):

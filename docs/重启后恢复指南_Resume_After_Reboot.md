@@ -11,7 +11,7 @@
 - [x] 前端依赖安装 (`app/node_modules`)
 - [x] 后端 Python 依赖安装
 - [x] 后端 `.env` 配置（最小模式 + DeepSeek API Key）
-- [x] Docker 镜像拉取完成（postgres, redis, bifrost, logto, ragflow, elasticsearch）
+- [x] Docker 镜像拉取完成（postgres, redis, bifrost, logto）
 - [x] Docker 容器镜像构建完成（delta-backend, delta-frontend）
 - [x] SQLite 兼容性修复（ConversationResponse 懒加载问题）
 - [x] LLM_MODEL 修正为 deepseek-v4-pro
@@ -21,8 +21,8 @@
 - [ ] 重启后启动 Docker 基础设施
 - [ ] 后端切到 PostgreSQL + Bifrost + Logto 模式
 - [ ] 后端用 Docker 模式启动
-- [ ] RAGFlow 教材知识库（镜像过大，可能需要单独处理）
-- [ ] 语音功能（FunASR/Kokoro 镜像仓库已失效，暂不可用）
+- [ ] RAG 教材知识库（ChromaDB 本地持久化，随 pip 安装）
+- [ ] 语音功能（Edge-TTS 默认可用，本地 FunASR 需 pip install funasr）
 
 ---
 
@@ -57,7 +57,7 @@ LLM_API_KEY=your_api_key_here
 
 ### docker-compose.yml 当前状态
 - 启用: postgres, redis, bifrost, logto
-- 禁用: ragflow, elasticsearch, funasr, kokoro, faster-whisper, backend, frontend
+- 可选: funasr, kokoro, faster-whisper（--profile voice）, backend, frontend（--profile app）
 
 ### 已修复的代码 Bug
 1. `backend/app/schemas/schemas.py` — 新增 ConversationDetailResponse（拆出 messages 字段）

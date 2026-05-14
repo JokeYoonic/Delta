@@ -1,6 +1,6 @@
 from app.skills.base import ZhixuebanSkill, SkillContext, SkillResult
 from app.services import ai_tutor_engine
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 
 
 TEACHING_STEPS = [
@@ -54,7 +54,7 @@ class ClassroomSkill(ZhixuebanSkill):
 
         rag_context = ""
         try:
-            rag_result = await ragflow_service.query(f"{subject} {topic}")
+            rag_result = await rag_service.query(f"{subject} {topic}")
             if rag_result.get("answer"):
                 rag_context = f"\n\n参考教材内容：\n{rag_result['answer']}"
         except Exception:

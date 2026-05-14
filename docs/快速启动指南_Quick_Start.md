@@ -36,19 +36,28 @@ LLM_API_KEY=sk-你的DeepSeek密钥
 ## 第二步：启动 Docker 基础设施（需要 2-5 分钟）
 
 ```bash
-# 在 Delta 目录下执行
+# 在 Delta 目录下执行（默认只启动核心基础设施）
 docker compose up -d
 ```
 
-这会启动：
+默认启动核心基础设施：
 - PostgreSQL 16（数据库）
 - Redis 7（缓存）
 - bifrost（LLM 统一网关）
 - Logto（认证服务）
-- RAGFlow + Elasticsearch（RAG 引擎）
-- FunASR（语音识别）
-- Kokoro（语音合成）
-- faster-whisper（备用 ASR）
+
+RAG 引擎使用 **ChromaDB**（轻量级本地向量数据库，随 pip 安装，无需 Docker）。
+
+语音服务默认使用 **Edge-TTS**（纯 Python，无需 Docker）和 **本地 FunASR**（pip install funasr）。
+
+如需启动可选服务：
+```bash
+# 启动应用服务（backend + frontend 容器）
+docker compose --profile app up -d
+
+# 启动语音服务（Docker 版 FunASR/Kokoro/faster-whisper，镜像可用时）
+docker compose --profile voice up -d
+```
 
 **等待所有容器就绪**：
 ```bash
@@ -97,7 +106,6 @@ npm run dev
 | 前端页面 | http://localhost:5173 |
 | 后端 API | http://localhost:8000 |
 | API 文档 (Swagger) | http://localhost:8000/docs |
-| RAGFlow 管理界面 | http://localhost |
 | bifrost 网关 | http://localhost:8080 |
 | Logto 管理后台 | http://localhost:3302 |
 
@@ -142,11 +150,12 @@ git push -u origin main
 | `LLM_MODEL` | 模型名 | 默认 deepseek-chat |
 | `BIFROST_ENABLED` | 启用 LLM 网关 | 默认 true |
 | `LOGTO_ENABLED` | 启用认证服务 | 默认 true |
-| `RAGFLOW_API_KEY` | RAGFlow 密钥 | 启动后去 RAGFlow 界面获取 |
+| `CHROMA_COLLECTION_NAME` | ChromaDB 集合名 | 默认 delta-textbooks |
+| `CHROMA_PERSIST_DIR` | ChromaDB 持久化目录 | 默认 ./data/chroma |
 | `NEON_ENABLED` | 启用 Neon 云数据库 | 默认 false |
 | `OCR_ENGINE` | OCR 引擎 rapidocr/paddleocr | 默认 rapidocr |
-| `ASR_ENGINE` | 语音识别引擎 | 默认 funasr |
-| `TTS_ENGINE` | 语音合成引擎 | 默认 edge-tts |
+| `ASR_ENGINE` | 语音识别引擎 local_funasr/funasr/faster_whisper | 默认 local_funasr |
+| `TTS_ENGINE` | 语音合成引擎 edge_tts/kokoro | 默认 edge_tts |
 
 ---
 

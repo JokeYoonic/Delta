@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.database import async_session
 from app.models import TutorConfig
 from app.services import ai_tutor_engine
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 from app.services.study_tracker import study_tracker
 from app.services.usage_limiter import usage_limiter
 from app.skills.classroom_skill import TEACHING_STEPS
@@ -184,7 +184,7 @@ async def _send_step_content(
 
     rag_context = ""
     try:
-        rag_result = await ragflow_service.query(f"{subject} {topic}")
+        rag_result = await rag_service.query(f"{subject} {topic}")
         if rag_result.get("answer"):
             rag_context = f"\n\n参考教材内容：\n{rag_result['answer']}"
     except Exception:

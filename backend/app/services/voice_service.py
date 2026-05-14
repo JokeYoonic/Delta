@@ -41,14 +41,16 @@ class VoiceService:
             return await self._funasr_stt(audio_data)
         elif self.asr_engine == "faster_whisper":
             return await self._faster_whisper_stt(audio_data)
-        return await self._funasr_stt(audio_data)
+        elif self.asr_engine == "local_funasr":
+            return await self._local_funasr_stt(audio_data, language)
+        return await self._local_funasr_stt(audio_data, language)
 
     async def text_to_speech(self, text: str, voice: str = None, language: str = "zh") -> bytes:
         if self.tts_engine == "kokoro":
             return await self._kokoro_tts(text, voice)
         elif self.tts_engine == "edge_tts":
             return await self._edge_tts(text, voice)
-        return await self._kokoro_tts(text, voice)
+        return await self._edge_tts(text, voice)
 
     async def _funasr_stt(self, audio_data: bytes) -> dict:
         try:
@@ -68,6 +70,26 @@ class VoiceService:
                 }
         except httpx.HTTPError:
             return {"text": "", "confidence": 0, "language": "zh", "segments": []}
+
+    async def _local_funasr_stt(self, audio_data: bytes, language: str = "zh") -> dict:
+        try:
+            from funasr import AutoModel
+            model = AutoModel(model="paraformer-zh")
+            import tempfile
+            import os
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(audio_data)
+                tmp_path = f.name
+            try:
+                result = model.generate(input=tmp_path)
+                text = result[0]["text"] if result else ""
+            finally:
+                os.unlink(tmp_path)
+            return {"text": text, "confidence": 0.9, "language": language, "segments": []}
+        except ImportError:
+            return await self._funasr_stt(audio_data)
+        except Exception:
+            return {"text": "", "confidence": 0, "language": language, "segments": []}
 
     async def _faster_whisper_stt(self, audio_data: bytes) -> dict:
         try:

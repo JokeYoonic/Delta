@@ -2,7 +2,7 @@
 import os, sys, re, asyncio, argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.services.rag_service import ragflow_service
+from app.services.rag_service import rag_service
 
 # 人教版初中主科核心知识点（示例——实际生产应爬取或导入完整教材）
 KNOWLEDGE_BASE = {
@@ -55,17 +55,17 @@ async def seed_knowledge_base(kb_name: str = "delta-textbooks"):
     total = 0
     for subject, texts in KNOWLEDGE_BASE.items():
         content = "\n\n".join(texts)
-        result = await ragflow_service.upload_document(kb_name, f"{subject}_知识点.txt", content.encode("utf-8"))
+        result = await rag_service.upload_document(kb_name, f"{subject}_知识点.txt", content.encode("utf-8"))
         print(f"[{subject}] {result['status']}: {result.get('chunks', 0)} chunks")
         total += result.get("chunks", 0)
     print(f"\n总计: {total} chunks 写入知识库 '{kb_name}'")
 
 
 async def list_knowledge(kb_name: str = "delta-textbooks"):
-    datasets = await ragflow_service.list_datasets()
+    datasets = await rag_service.list_datasets()
     for ds in datasets:
         if ds["name"] == kb_name:
-            docs = await ragflow_service.list_documents(ds["name"])
+            docs = await rag_service.list_documents(ds["name"])
             print(f"知识库 '{kb_name}': {len(docs)} 篇文档, {ds['count']} chunks")
             for d in docs:
                 print(f"  - {d['name']}: {d['chunks']} chunks")
@@ -87,7 +87,7 @@ async def crawl_url(url: str, kb_name: str = "delta-textbooks"):
             return
 
         name = re.sub(r"[^\w]", "_", url)[:50]
-        result = await ragflow_service.upload_document(kb_name, f"crawl_{name}.txt", text.encode("utf-8"))
+        result = await rag_service.upload_document(kb_name, f"crawl_{name}.txt", text.encode("utf-8"))
         print(f"爬取完成: {result['status']}, {result.get('chunks', 0)} chunks")
     except Exception as e:
         print(f"爬取失败: {e}")

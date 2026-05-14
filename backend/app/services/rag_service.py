@@ -7,19 +7,20 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ChromaDB + embedding 延迟加载
 _client = None
 _embed_fn = None
-
-CHROMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "chroma_data")
 
 
 def _get_client():
     global _client
     if _client is None:
         import chromadb
-        os.makedirs(CHROMA_PATH, exist_ok=True)
-        _client = chromadb.PersistentClient(path=CHROMA_PATH)
+        chroma_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            settings.CHROMA_PERSIST_DIR,
+        )
+        os.makedirs(chroma_path, exist_ok=True)
+        _client = chromadb.PersistentClient(path=chroma_path)
     return _client
 
 
@@ -43,7 +44,6 @@ def _get_embed_fn():
     else:
         from sentence_transformers import SentenceTransformer
 
-        # 本地模型：如果配置的 EMBEDDING_MODEL 不是 sentence-transformers 模型名，用默认值
         model_name = settings.EMBEDDING_MODEL or ""
         if "/" not in model_name and not model_name.startswith("sentence-transformers/"):
             model_name = "paraphrase-multilingual-MiniLM-L12-v2"
@@ -59,44 +59,41 @@ def _get_embed_fn():
     return _embed_fn
 
 
-def _split_text(text: str, chunk_size: int = 500, overlap: int = 80) -> list[str]:
-    """按段落 + 句子拆分文本为 chunk。"""
+def _split_text(text: str, chunk_size: int = None, overlap: int = None) -> list[str]:
     paragraphs = text.split("\n\n")
     chunks = []
+    _chunk_size = chunk_size or settings.CHUNK_SIZE
+    _overlap = overlap or settings.CHUNK_OVERLAP
     for para in paragraphs:
         para = para.strip()
         if not para:
             continue
-        if len(para) <= chunk_size:
+        if len(para) <= _chunk_size:
             chunks.append(para)
         else:
             sentences = re.split(r"(?<=[。！？.!?])\s*", para)
             current = ""
             for sent in sentences:
-                if len(current) + len(sent) <= chunk_size:
+                if len(current) + len(sent) <= _chunk_size:
                     current += sent
                 else:
                     if current.strip():
                         chunks.append(current.strip())
-                    current = current[-overlap:] + sent if len(current) > overlap else sent
+                    current = current[-_overlap:] + sent if len(current) > _overlap else sent
             if current.strip():
                 chunks.append(current.strip())
     return chunks
 
 
 class ChromaRAGService:
-    """基于 ChromaDB 的本地 RAG 引擎，替代 RAGFlow。
+    """基于 ChromaDB 的本地 RAG 引擎。
 
-    RAGFlow 未使用的原因为：
-    1. Docker 镜像过大 (12.6GB)，开发笔记本 (16GB RAM) 启动即 OOM
-    2. 最新版 (v0.25.3) 有 itsdangerous / hpack 等依赖链断裂，无法正常启动
-    3. ChromaDB 为 pip install 级别轻量方案，功能生态位完全覆盖上传→分块→向量化→检索全流程
-    4. 避免了 RAGFlow 的"双重 LLM"问题：原 RAGFlow query 内部调用 LLM 生成答案，
-       再作为 context 喂给 DeepSeek，导致同一问题经过两个 LLM
+    ChromaDB 为 pip install 级别轻量方案，覆盖上传→分块→向量化→检索全流程。
+    纯检索模式，不调用 LLM，避免"双重 LLM"问题。
     """
 
     def _get_collection(self, kb_name: str):
-        name = re.sub(r"[^a-zA-Z0-9_-]", "_", kb_name or settings.RAGFLOW_KB_NAME)
+        name = re.sub(r"[^a-zA-Z0-9_-]", "_", kb_name or settings.CHROMA_COLLECTION_NAME)
         return _get_client().get_or_create_collection(name=name)
 
     async def list_datasets(self) -> list[dict]:
@@ -120,13 +117,12 @@ class ChromaRAGService:
             except Exception:
                 return {"status": "error", "message": "无法解码文件，仅支持 UTF-8/GBK 文本"}
 
-        chunks = _split_text(text, chunk_size=500, overlap=80)
+        chunks = _split_text(text)
         if not chunks:
             return {"status": "error", "message": "文件内容为空或过短"}
 
         embeddings = embed_fn(chunks)
         ids = [f"{file_name}_{i}" for i in range(len(chunks))]
-        # 从文件名提取科目名：数学_知识点.txt → 数学
         subject_tag = re.split(r"[_\-.]", file_name)[0] if file_name else ""
         metadatas = [{"document_name": file_name, "chunk_index": i, "text": c, "subject": subject_tag} for i, c in enumerate(chunks)]
 
@@ -165,12 +161,11 @@ class ChromaRAGService:
         return {"status": "deleted", "count": len(ids_to_delete)}
 
     async def query(self, question: str, kb_name: str = None, top_k: int = 5) -> dict:
-        """纯检索——支持按科目(文档名)过滤。"""
-        kb = kb_name or settings.RAGFLOW_KB_NAME
+        """纯检索——支持按科目(subject metadata)过滤。"""
+        kb = kb_name or settings.CHROMA_COLLECTION_NAME
         embed_fn = _get_embed_fn()
 
-        # 始终在 delta-textbooks 集合中检索
-        collection_name = re.sub(r"[^a-zA-Z0-9_-]", "_", settings.RAGFLOW_KB_NAME)
+        collection_name = re.sub(r"[^a-zA-Z0-9_-]", "_", settings.CHROMA_COLLECTION_NAME)
         try:
             collection = _get_client().get_collection(name=collection_name)
         except Exception:
@@ -178,16 +173,13 @@ class ChromaRAGService:
 
         query_embedding = embed_fn([question])
 
-        # 如果 kb_name 是科目名（非集合名），按文档名过滤
         results = None
-        if kb_name and kb_name != settings.RAGFLOW_KB_NAME:
-            # 先尝试按科目过滤
+        if kb_name and kb_name != settings.CHROMA_COLLECTION_NAME:
             results = collection.query(
                 query_embeddings=query_embedding, n_results=top_k,
                 where={"subject": kb_name},
             )
 
-        # 过滤无结果则回退全库搜索
         if results is None or not results.get("documents") or not results["documents"][0]:
             results = collection.query(query_embeddings=query_embedding, n_results=top_k)
 
@@ -216,5 +208,4 @@ class ChromaRAGService:
         }
 
 
-# 全局单例，接口兼容旧的 ragflow_service
-ragflow_service = ChromaRAGService()
+rag_service = ChromaRAGService()

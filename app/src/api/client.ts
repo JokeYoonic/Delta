@@ -293,6 +293,7 @@ export const classroomApi = {
 };
 
 export const knowledgeApi = {
+  getSubjects: () => api.get<{ subjects: string[]; stats: Record<string, number> }>('/knowledge/subjects'),
   getDueReviews: () => api.get<{ due_count: number; knowledge_points: Record<string, unknown>[] }>('/knowledge/due-reviews'),
   submitReview: (kpId: string, quality: number) =>
     api.post<Record<string, unknown>>(`/knowledge/review/${kpId}?quality=${quality}`, {}),
@@ -332,10 +333,26 @@ export const agentsApi = {
   get: (role: string) => api.get<Record<string, unknown>>(`/agents/${role}`),
 };
 
+export interface MemoryBookItem {
+  id: string;
+  title: string;
+  description: string;
+  subject: string;
+  is_public: boolean;
+  created_at: string | null;
+}
+
+export interface EnsureDefaultResponse {
+  id: string;
+  title: string;
+  created: boolean;
+}
+
 export const memoryBooksApi = {
-  list: () => api.get<Record<string, unknown>[]>('/memory-books'),
+  list: () => api.get<MemoryBookItem[]>('/memory-books'),
   create: (data: { title: string; description?: string; subject?: string }) =>
-    api.post<Record<string, unknown>>('/memory-books', data),
+    api.post<MemoryBookItem>('/memory-books', data),
+  ensureDefault: () => api.post<EnsureDefaultResponse>('/memory-books/ensure-default', {}),
   getEntries: (bookId: string) => api.get<Record<string, unknown>[]>(`/memory-books/${bookId}/entries`),
   createEntry: (bookId: string, data: { title: string; content?: string; knowledge_points?: string[]; tags?: string[] }) =>
     api.post<Record<string, unknown>>(`/memory-books/${bookId}/entries`, data),

@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-from app.services.rag_service import ragflow_service, ChromaRAGService
+from app.services.rag_service import rag_service, ChromaRAGService
 
 
 async def test_upload():
@@ -40,7 +40,7 @@ x₁ + x₂ = -b/a
 x₁ · x₂ = c/a
 """
 
-    result = ragflow_service.upload_document("delta-textbooks", "一元二次方程.txt", test_content.encode("utf-8"))
+    result = rag_service.upload_document("delta-textbooks", "一元二次方程.txt", test_content.encode("utf-8"))
     print(f"  上传结果: {result['status']}, 分块数: {result.get('chunks', 0)}")
     assert result["status"] == "uploaded"
 
@@ -48,7 +48,7 @@ x₁ · x₂ = c/a
 def test_list_datasets():
     """测试：列出数据集。"""
     print("\n=== 测试：列出数据集 ===")
-    datasets = ragflow_service.list_datasets()
+    datasets = rag_service.list_datasets()
     print(f"  数据集数量: {len(datasets)}")
     for ds in datasets:
         print(f"  - {ds['name']}: {ds.get('count', 0)} chunks")
@@ -58,7 +58,7 @@ def test_list_datasets():
 def test_list_documents():
     """测试：列出文档。"""
     print("\n=== 测试：列出文档 ===")
-    docs = ragflow_service.list_documents("delta-textbooks")
+    docs = rag_service.list_documents("delta-textbooks")
     print(f"  文档数量: {len(docs)}")
     for d in docs:
         print(f"  - {d['name']}: {d.get('chunks', 0)} chunks")
@@ -77,7 +77,7 @@ async def test_query():
     ]
 
     for q in questions:
-        result = ragflow_service.query(q, "delta-textbooks", top_k=3)
+        result = rag_service.query(q, "delta-textbooks", top_k=3)
         print(f"\n  问题: {q}")
         print(f"  置信度: {result['confidence']}")
         print(f"  来源数: {len(result['sources'])}")
@@ -110,20 +110,20 @@ async def test_modify():
 顶点式：y = a(x - h)² + k，其中 (h, k) 是顶点坐标。
 """
 
-    result = ragflow_service.upload_document("delta-textbooks", "二次函数.txt", extra_content.encode("utf-8"))
+    result = rag_service.upload_document("delta-textbooks", "二次函数.txt", extra_content.encode("utf-8"))
     print(f"  上传二次函数: {result['status']}, 分块: {result.get('chunks', 0)}")
 
     # 检索确认新内容可用
-    result = ragflow_service.query("二次函数的顶点坐标怎么求？", "delta-textbooks", top_k=3)
+    result = rag_service.query("二次函数的顶点坐标怎么求？", "delta-textbooks", top_k=3)
     print(f"  检索'顶点坐标': 置信度={result['confidence']}, 来源数={len(result['sources'])}")
     assert len(result["sources"]) > 0
 
     # 删除二次函数文档
-    del_result = ragflow_service.delete_document("delta-textbooks", "二次函数.txt")
+    del_result = rag_service.delete_document("delta-textbooks", "二次函数.txt")
     print(f"  删除二次函数: {del_result['status']}, 删除了 {del_result['count']} chunks")
 
     # 确认已删除
-    result = ragflow_service.query("二次函数的顶点坐标怎么求？", "delta-textbooks", top_k=3)
+    result = rag_service.query("二次函数的顶点坐标怎么求？", "delta-textbooks", top_k=3)
     print(f"  删除后检索'顶点坐标': 置信度={result['confidence']}")
     # 删除后confindence应该下降（因为相关内容被移除）
 

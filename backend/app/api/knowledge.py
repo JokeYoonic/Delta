@@ -6,8 +6,14 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import User, KnowledgePoint
 from app.services.sm2_scheduler import sm2_scheduler
+from app.services.knowledge_service import list_subjects, get_knowledge_stats
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
+
+
+@router.get("/subjects")
+async def get_subjects():
+    return {"subjects": list_subjects(), "stats": get_knowledge_stats()}
 
 
 @router.get("/due-reviews")
