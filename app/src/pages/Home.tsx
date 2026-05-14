@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useStore } from '@/store';
 import { AppLayout } from '@/sections/AppLayout';
 import { Dashboard } from '@/sections/Dashboard';
@@ -10,15 +11,16 @@ import { MemoryBooks } from '@/sections/MemoryBooks';
 import { StudyReport } from '@/sections/StudyReport';
 import { ParentDashboard } from '@/sections/ParentDashboard';
 import { UserProfile } from '@/sections/UserProfile';
-import { LoginPage } from '@/sections/LoginPage';
 
 export default function Home() {
   const currentPage = useStore((s) => s.currentPage);
-  const isAuthenticated = useStore((s) => s.isAuthenticated);
+  const loadConversations = useStore((s) => s.loadConversations);
+  const loadReports = useStore((s) => s.loadReports);
 
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
+  useEffect(() => {
+    loadConversations();
+    loadReports();
+  }, []);
 
   const renderPage = () => {
     switch (currentPage) {

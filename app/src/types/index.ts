@@ -2,10 +2,11 @@
 export interface User {
   id: string;
   name: string;
+  email?: string;
   avatar: string;
   grade: string;
   school: string;
-  role: 'student' | 'parent' | 'teacher';
+  role: 'student' | 'parent' | 'teacher' | 'superadmin';
   points: number;
   streakDays: number;
 }

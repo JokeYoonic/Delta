@@ -1,16 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
+from jose import jwt
 import bcrypt
-from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import get_db
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -38,55 +35,25 @@ def is_super_user(user_id: str) -> bool:
     return user_id == settings.SUPER_USER_ID
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    if settings.LOGTO_ENABLED:
-        from app.services.logto_service import logto_service
-        user_info = await logto_service.verify_token(token)
-        if user_info:
-            logto_sub = user_info.get("sub", "")
-            from app.models import User
-            result = await db.execute(select(User).where(User.email == logto_sub))
-            user = result.scalar_one_or_none()
-            if user:
-                return user
-            user = User(
-                id=logto_sub if logto_sub else str(hash(logto_sub)),
-                name=user_info.get("name", user_info.get("username", "User")),
-                email=user_info.get("email", logto_sub),
-                hashed_password=get_password_hash("logto-managed"),
-                role="superadmin" if is_super_user(logto_sub) else settings.LOGTO_DEFAULT_ROLE,
-            )
-            db.add(user)
-            await db.flush()
-            await db.refresh(user)
-            return user
-
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-
+async def get_current_user(db: AsyncSession = Depends(get_db)):
+    """开发阶段：跳过鉴权，始终返回超级管理员。"""
     from app.models import User
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == settings.SUPER_USER_ID))
     user = result.scalar_one_or_none()
-    if user is None:
-        raise credentials_exception
+    if user:
+        return user
+    user = User(
+        id=settings.SUPER_USER_ID,
+        name="Super Admin",
+        email="user77@delta.ai",
+        hashed_password=get_password_hash("delta77admin"),
+        role=settings.SUPER_USER_ROLE,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
     return user
 
 
 async def get_current_superuser(current_user=Depends(get_current_user)):
-    if not is_super_user(current_user.id) and current_user.role != settings.SUPER_USER_ROLE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super admin access required",
-        )
     return current_user
